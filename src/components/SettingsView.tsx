@@ -3,6 +3,7 @@
 import { Download } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { THEME_LABELS } from "@/lib/client/theme";
+import { toast } from "@/store/useToast";
 import type { ThemeMode } from "@/lib/domain/types";
 
 const THEMES: ThemeMode[] = ["light", "dark", "system"];
@@ -40,6 +41,29 @@ export function SettingsView() {
             ? `已启用 · 模型 ${aiStatus.model}（在 .env 中配置 AI_API_KEY / AI_BASE_URL / AI_MODEL 后重启服务）`
             : "未配置。在项目根目录 .env 中设置 AI_API_KEY 后重启服务即可启用马力与 AI 拆分/排期。"}
         </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-sm font-semibold">提醒</h2>
+        <p className="mb-2 text-xs text-muted-foreground">
+          开启后，打开应用时会收到「今天到期 / 已逾期」任务的浏览器通知（同任务每次会话一次）。
+        </p>
+        <button
+          onClick={async () => {
+            if (typeof Notification === "undefined") {
+              toast({ title: "当前浏览器不支持通知", tone: "error" });
+              return;
+            }
+            const p = await Notification.requestPermission();
+            toast({
+              title: p === "granted" ? "已开启到期提醒" : "未授权通知",
+              tone: p === "granted" ? "success" : "info",
+            });
+          }}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          启用到期提醒
+        </button>
       </section>
 
       <section>

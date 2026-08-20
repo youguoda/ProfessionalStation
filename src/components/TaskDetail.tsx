@@ -25,6 +25,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const tags = useStore((s) => s.tags);
   const createTag = useStore((s) => s.createTag);
   const aiStatus = useStore((s) => s.aiStatus);
+  const agentOpen = useStore((s) => s.agentOpen);
 
   const pomodoroStatus = usePomodoro((s) => s.status);
   const focusTaskId = usePomodoro((s) => s.focusTaskId);
@@ -147,7 +148,11 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-[26rem] overflow-y-auto border-l bg-background p-5 shadow-xl">
+      <div
+        className={`absolute top-0 h-full w-[26rem] overflow-y-auto border-l bg-background p-5 shadow-xl ${
+          agentOpen ? "right-[26rem]" : "right-0"
+        }`}
+      >
         <div className="mb-4 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
             {PHASE_LABELS[task.phase]} · {STATUS_LABELS[task.status]}
@@ -277,14 +282,33 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
 
           <label className="col-span-2 text-xs text-muted-foreground">
             排期时间（时间块）
-            <input
-              type="datetime-local"
-              value={task.scheduledAt ? task.scheduledAt.slice(0, 16) : ""}
-              onChange={(e) =>
-                save({ scheduledAt: e.target.value ? `${e.target.value}:00` : null })
-              }
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-            />
+            <div className="flex gap-2">
+              <input
+                type="datetime-local"
+                value={task.scheduledAt ? task.scheduledAt.slice(0, 16) : ""}
+                onChange={(e) =>
+                  save({ scheduledAt: e.target.value ? `${e.target.value}:00` : null })
+                }
+                className="mt-1 w-full flex-1 rounded-md border bg-background px-2 py-1.5 text-sm"
+              />
+              <input
+                type="number"
+                min={15}
+                max={480}
+                step={15}
+                value={task.durationMinutes ?? 30}
+                onChange={(e) =>
+                  save({
+                    durationMinutes: Math.min(
+                      480,
+                      Math.max(15, Number(e.target.value) || 30),
+                    ),
+                  })
+                }
+                className="mt-1 w-24 rounded-md border bg-background px-2 py-1.5 text-sm"
+                title="时长（分钟）"
+              />
+            </div>
           </label>
 
           <label className="text-xs text-muted-foreground">

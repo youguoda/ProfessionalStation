@@ -14,6 +14,8 @@ export async function PATCH(req: Request) {
   if (body.theme === "light" || body.theme === "dark" || body.theme === "system") {
     patch.theme = body.theme;
   }
+  if (typeof body.dayStartHour === "number") patch.dayStartHour = body.dayStartHour;
+  if (typeof body.dayEndHour === "number") patch.dayEndHour = body.dayEndHour;
   if (body.automations && typeof body.automations === "object") {
     const a = body.automations as Record<string, unknown>;
     const automations: Record<string, boolean> = {};

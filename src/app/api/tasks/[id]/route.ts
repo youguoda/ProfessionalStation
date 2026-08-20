@@ -10,6 +10,7 @@ const patchSchema = z.object({
   dueDate: z.string().nullable().optional(),
   startDate: z.string().nullable().optional(),
   scheduledAt: z.string().nullable().optional(),
+  durationMinutes: z.number().int().min(15).max(480).optional(),
   projectId: z.string().nullable().optional(),
   areaId: z.string().nullable().optional(),
   parentId: z.string().nullable().optional(),

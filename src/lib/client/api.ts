@@ -113,11 +113,13 @@ export const api = {
   sendChatStream: async (
     text: string,
     onToken: (delta: string) => void,
+    signal?: AbortSignal,
   ): Promise<ChatMessage[]> => {
     const res = await fetch("/api/agent/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
+      signal,
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

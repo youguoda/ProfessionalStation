@@ -89,6 +89,8 @@ describe("selectKanban", () => {
       staleWaitingReminder: false,
     },
     theme: "system",
+    dayStartHour: 8,
+    dayEndHour: 22,
   };
 
   it("按 status 分列、按优先级排序、wip 取自 settings", () => {

@@ -59,7 +59,14 @@ function normalizeDb(raw: Partial<Db>): Db {
     ...defaults,
     ...db,
     tasks: Array.isArray(db.tasks)
-      ? db.tasks.map((t) => ({ ...t, history: Array.isArray(t.history) ? t.history : [] }))
+      ? db.tasks.map((t) => ({
+          ...t,
+          history: Array.isArray(t.history) ? t.history : [],
+          durationMinutes:
+            typeof t.durationMinutes === "number" && t.durationMinutes >= 15
+              ? t.durationMinutes
+              : 30,
+        }))
       : [],
     projects: Array.isArray(db.projects) ? db.projects : [],
     areas: Array.isArray(db.areas) ? db.areas : [],
@@ -94,6 +101,8 @@ function normalizeDb(raw: Partial<Db>): Db {
       ...s,
       kanbanWip: { ...defaults.settings.kanbanWip, ...(s.kanbanWip ?? {}) },
       automations: { ...defaults.settings.automations, ...(s.automations ?? {}) },
+      dayStartHour: typeof s.dayStartHour === "number" ? s.dayStartHour : 8,
+      dayEndHour: typeof s.dayEndHour === "number" ? s.dayEndHour : 22,
     },
   };
 }

@@ -105,6 +105,8 @@ export const useStore = create<AppState>((set, get) => ({
     kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
     automations: { autoFlagOverdueFrog: false, autoClearFrogOnDone: true, staleWaitingReminder: false },
     theme: "system",
+    dayStartHour: 8,
+    dayEndHour: 22,
   },
   automationLog: [],
   aiStatus: null,

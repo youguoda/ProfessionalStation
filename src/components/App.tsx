@@ -22,6 +22,7 @@ import { ProjectDetailView } from "./ProjectDetailView";
 import { SettingsView } from "./SettingsView";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { triggerUndo } from "@/store/useToast";
+import { checkReminders } from "@/lib/client/reminders";
 
 const LIST_SCOPES = ["inbox", "today", "upcoming", "anytime", "waiting", "someday", "trash"];
 
@@ -36,10 +37,16 @@ export function App() {
   const selectedTaskId = useStore((s) => s.selectedTaskId);
   const openTask = useStore((s) => s.openTask);
   const closeTask = useStore((s) => s.closeTask);
+  const tasks = useStore((s) => s.tasks);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // 到期提醒（浏览器通知，同任务每次会话一次）
+  useEffect(() => {
+    if (loaded) checkReminders(tasks);
+  }, [loaded, tasks]);
 
   // 全局快捷键：Cmd/Ctrl+Z 撤销；Q 聚焦快速捕获（不在输入框内时）
   useEffect(() => {
@@ -140,8 +147,8 @@ export function App() {
           )}
         </main>
       </div>
-      {selectedTaskId ? <TaskDetail id={selectedTaskId} onClose={closeTask} /> : null}
       {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
+      {selectedTaskId ? <TaskDetail id={selectedTaskId} onClose={closeTask} /> : null}
       {!selectedTaskId && !agentOpen ? <PomodoroDock /> : null}
       <ToastViewport />
       <CommandPalette />

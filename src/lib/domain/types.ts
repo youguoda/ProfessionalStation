@@ -37,6 +37,8 @@ export interface Task {
   startDate: string | null;
   /** 已排期到具体时间块，ISO datetime */
   scheduledAt: string | null;
+  /** 时间块时长（分钟，15–480） */
+  durationMinutes: number;
   completedAt: string | null;
   projectId: string | null;
   areaId: string | null;
@@ -158,6 +160,10 @@ export interface Settings {
   automations: AutomationSettings;
   /** 主题（浅色/深色/跟随系统） */
   theme: ThemeMode;
+  /** 时间块视图的开始小时（0–23） */
+  dayStartHour: number;
+  /** 时间块视图的结束小时（0–24） */
+  dayEndHour: number;
 }
 
 /** 马力可建议的操作类型（HITL：仅建议，经用户确认后执行） */

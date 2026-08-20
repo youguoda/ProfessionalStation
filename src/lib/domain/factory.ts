@@ -19,6 +19,7 @@ export interface NewTaskInput {
   dueDate?: string | null;
   startDate?: string | null;
   scheduledAt?: string | null;
+  durationMinutes?: number;
   projectId?: string | null;
   areaId?: string | null;
   parentId?: string | null;
@@ -47,6 +48,7 @@ export function createTask(input: NewTaskInput): Task {
     dueDate: input.dueDate ?? null,
     startDate: input.startDate ?? null,
     scheduledAt: input.scheduledAt ?? null,
+    durationMinutes: input.durationMinutes ?? 30,
     completedAt: input.completedAt ?? null,
     projectId: input.projectId ?? null,
     areaId: input.areaId ?? null,
@@ -140,6 +142,8 @@ export function emptyDb(): Db {
         staleWaitingReminder: false,
       },
       theme: "system",
+      dayStartHour: 8,
+      dayEndHour: 22,
     },
     agentProfile: defaultAgentProfile(),
     chatMessages: [],
