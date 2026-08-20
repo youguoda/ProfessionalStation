@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 25% 97%;
+  --foreground: 224 20% 12%;
+  --muted: 220 15% 92%;
+  --muted-foreground: 220 10% 45%;
+  --primary: 224 76% 48%;
+  --primary-foreground: 0 0% 100%;
+  --border: 220 15% 86%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 224 24% 9%;
+    --foreground: 220 15% 92%;
+    --muted: 224 18% 16%;
+    --muted-foreground: 220 10% 60%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 224 24% 9%;
+    --border: 224 18% 20%;
+  }
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}

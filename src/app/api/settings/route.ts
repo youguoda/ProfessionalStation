@@ -1,0 +1,16 @@
+import { NextResponse } from "next/server";
+import { getSettings, updateSettings } from "@/lib/db/store";
+
+export async function GET() {
+  const settings = await getSettings();
+  return NextResponse.json(settings);
+}
+
+export async function PATCH(req: Request) {
+  const body = await req.json();
+  const patch: Record<string, unknown> = {};
+  if (typeof body.defaultMode === "string") patch.defaultMode = body.defaultMode;
+  if (body.kanbanWip && typeof body.kanbanWip === "object") patch.kanbanWip = body.kanbanWip;
+  const settings = await updateSettings(patch as never);
+  return NextResponse.json(settings);
+}

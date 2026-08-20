@@ -1,0 +1,137 @@
+"use client";
+
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useStore } from "@/store/useStore";
+import { selectKanban } from "@/lib/engine/selectors";
+import { PRIORITY_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
+import type { Status, Task } from "@/lib/domain/types";
+
+const COLUMNS: Status[] = ["todo", "doing", "done"];
+
+function Card({ task, onSelect }: { task: Task; onSelect: (id: string) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useSortable({
+    id: task.id,
+    data: { column: task.status },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform) }}
+      {...attributes}
+      {...listeners}
+      onClick={() => onSelect(task.id)}
+      className={`cursor-grab rounded-lg border bg-background px-3 py-2.5 text-sm shadow-sm hover:shadow ${
+        isDragging ? "opacity-50" : ""
+      }`}
+    >
+      <div className="leading-snug">{task.title}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="font-medium text-foreground/70">
+          {PRIORITY_LABELS[task.priority].split(" ")[0]}
+        </span>
+        {task.effort ? <span>⏱{task.effort}</span> : null}
+        {task.dueDate ? <span>📅 {task.dueDate}</span> : null}
+        {task.isFrog ? <span>🐸</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function Column({
+  status,
+  tasks,
+  wip,
+  onSelect,
+}: {
+  status: Status;
+  tasks: Task[];
+  wip: number;
+  onSelect: (id: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `col-${status}`, data: { column: status } });
+  const over = wip > 0 && tasks.length > wip;
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-h-[60vh] flex-col rounded-xl border bg-muted/40 p-3 ${
+        isOver ? "border-primary" : ""
+      }`}
+    >
+      <div className="mb-3 flex items-center justify-between px-1">
+        <h3 className="text-sm font-semibold">{STATUS_LABELS[status]}</h3>
+        <span
+          className={`rounded px-1.5 py-0.5 text-xs ${
+            over ? "bg-red-100 text-red-600" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {tasks.length}
+          {wip > 0 ? `/${wip}` : ""}
+        </span>
+      </div>
+
+      <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+        <div className="space-y-2">
+          {tasks.map((t) => (
+            <Card key={t.id} task={t} onSelect={onSelect} />
+          ))}
+          {tasks.length === 0 ? (
+            <p className="px-1 py-8 text-center text-xs text-muted-foreground">空</p>
+          ) : null}
+        </div>
+      </SortableContext>
+    </div>
+  );
+}
+
+export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
+  const tasks = useStore((s) => s.tasks);
+  const settings = useStore((s) => s.settings);
+  const transition = useStore((s) => s.transition);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const columns = selectKanban(tasks, settings).filter((c) =>
+    COLUMNS.includes(c.status as Status),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over) return;
+    const source = active.data.current?.column as Status | undefined;
+    let target = over.data.current?.column as Status | undefined;
+    if (!target && typeof over.id === "string" && over.id.startsWith("col-")) {
+      target = over.id.replace("col-", "") as Status;
+    }
+    if (target && source && target !== source) {
+      transition(String(active.id), { type: "setStatus", status: target }).catch(() => {});
+    }
+  }
+
+  return (
+    <div>
+      <h1 className="mb-5 text-xl font-semibold tracking-tight">看板</h1>
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
+        <div className="grid grid-cols-3 gap-4">
+          {columns.map((c) => (
+            <Column key={c.status} status={c.status} tasks={c.tasks} wip={c.wip} onSelect={onSelect} />
+          ))}
+        </div>
+      </DndContext>
+    </div>
+  );
+}
