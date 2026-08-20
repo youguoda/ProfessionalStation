@@ -194,4 +194,6 @@ export interface Db {
   agentProfile: AgentProfile;
   chatMessages: ChatMessage[];
   memoryNotes: MemoryNote[];
+  /** 对话早期摘要（滚动窗口：超阈值时把旧消息压缩进这里） */
+  chatSummary: string;
 }

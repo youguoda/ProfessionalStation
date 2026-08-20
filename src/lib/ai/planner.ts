@@ -68,6 +68,68 @@ export async function chatWithMessages(
   return content;
 }
 
+/**
+ * 流式调用（SSE 上游解析）：逐段产出 delta 文本。
+ * 用于马力的打字机回复（该调用不设置 json_object，模型输出纯文本）。
+ */
+export async function* streamChat(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  system?: string,
+  temperature = 0.7,
+): AsyncGenerator<string> {
+  const cfg = getAiConfig();
+  if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
+  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.AI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        {
+          role: "system",
+          content: system ?? "你是一个任务管理助手，用中文简洁回复。",
+        },
+        ...messages,
+      ],
+      temperature,
+      stream: true,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`AI 服务返回错误（HTTP ${res.status}）`);
+  }
+  if (!res.body) throw new Error("AI 未返回流式内容");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") return;
+      try {
+        const json = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) yield delta;
+      } catch {
+        /* 忽略无法解析的行 */
+      }
+    }
+  }
+}
+
 /** 宽松解析 JSON：支持裸 JSON、```json 代码块、文本中嵌入的 JSON */
 export function parseJsonLoose(text: string): unknown {
   try {

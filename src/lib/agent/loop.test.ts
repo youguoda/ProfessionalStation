@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAgentProfile } from "@/lib/domain/factory";
-import { runAgentTurn } from "./loop";
+import { runAgentTurn, streamAgentReply } from "./loop";
 
 function mockFetch(content: string) {
   vi.stubGlobal(
@@ -74,5 +74,81 @@ describe("runAgentTurn", () => {
   it("AI 服务错误抛错", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
     await expect(runAgentTurn({ ...base, userText: "x" })).rejects.toThrow("HTTP 500");
+  });
+});
+
+describe("streamAgentReply 流式回复", () => {
+  function mockStreamAndProposals() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (body.includes('"stream":true')) {
+          const sse =
+            "data: " +
+            JSON.stringify({ choices: [{ delta: { content: "今天先做" } }] }) +
+            "\n\n" +
+            "data: " +
+            JSON.stringify({ choices: [{ delta: { content: "写周报。" } }] }) +
+            "\n\n" +
+            "data: [DONE]\n\n";
+          return new Response(sse, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    proposals: [
+                      { tool: "create_task", args: { title: "写周报" }, summary: "新建写周报" },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+  }
+
+  it("逐 token 回调并完成建议二次调用", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockStreamAndProposals();
+    const tokens: string[] = [];
+    const r = await streamAgentReply(
+      { ...base, summary: "", userText: "今天先做什么？" },
+      (d) => tokens.push(d),
+    );
+    expect(tokens.join("")).toBe("今天先做写周报。");
+    expect(r.reply).toBe("今天先做写周报。");
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0].tool).toBe("create_task");
+  });
+
+  it("建议二次调用失败时不阻塞回复", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (body.includes('"stream":true')) {
+          const sse =
+            "data: " +
+            JSON.stringify({ choices: [{ delta: { content: "好的" } }] }) +
+            "\n\ndata: [DONE]\n\n";
+          return new Response(sse, { status: 200 });
+        }
+        return new Response("boom", { status: 500 });
+      }),
+    );
+    const r = await streamAgentReply({ ...base, summary: "", userText: "x" }, () => {});
+    expect(r.reply).toBe("好的");
+    expect(r.proposals).toEqual([]);
   });
 });

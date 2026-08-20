@@ -5,6 +5,7 @@ import {
   aiSchedule,
   getAiConfig,
   parseJsonLoose,
+  streamChat,
   validateAiSchedule,
 } from "./planner";
 
@@ -186,5 +187,37 @@ describe("aiSchedule（mock fetch / 降级）", () => {
     const r = await aiSchedule([t], monday);
     expect(r.source).toBe("heuristic");
     expect(r.suggestions).toHaveLength(1);
+  });
+});
+
+describe("streamChat 流式解析", () => {
+  function mockStream(chunks: string[]) {
+    const sse =
+      chunks
+        .map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`)
+        .join("") + "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+      ),
+    );
+  }
+
+  it("逐段产出 delta 并在 [DONE] 结束", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockStream(["你", "好", "！"]);
+    const parts: string[] = [];
+    for await (const delta of streamChat([{ role: "user", content: "x" }], "sys")) {
+      parts.push(delta);
+    }
+    expect(parts).toEqual(["你", "好", "！"]);
+  });
+
+  it("上游错误状态抛错", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
+    const gen = streamChat([{ role: "user", content: "x" }], "sys");
+    await expect(gen.next()).rejects.toThrow("HTTP 500");
   });
 });

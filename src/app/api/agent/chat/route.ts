@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { buildAgentContext } from "@/lib/agent/context";
-import { runAgentTurn } from "@/lib/agent/loop";
+import { extractMemoryFacts } from "@/lib/agent/facts";
+import { streamAgentReply } from "@/lib/agent/loop";
+import { splitForSummary, summarizeChat } from "@/lib/agent/summary";
 import { getAiConfig } from "@/lib/ai/planner";
 import {
+  addMemoryNote,
   appendChatMessages,
   clearChat,
   getDb,
   listChatMessages,
+  setChatSummary,
 } from "@/lib/db/store";
 
 export async function GET() {
@@ -19,6 +23,12 @@ export async function DELETE() {
   return NextResponse.json({ ok: true });
 }
 
+/**
+ * 流式对话（SSE）：
+ *   event: token  {type:"token", text:"..."}   打字机增量
+ *   event: done   {type:"done", messages:[...]} 完整消息列表（含建议卡片）
+ *   event: error  {type:"error", error:"..."}
+ */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const text = typeof body?.text === "string" ? body.text.trim() : "";
@@ -31,34 +41,77 @@ export async function POST(req: Request) {
   }
 
   const db = await getDb();
-  try {
-    const result = await runAgentTurn({
-      profile: db.agentProfile,
-      history: db.chatMessages,
-      context: buildAgentContext(db),
-      memoryNotes: db.memoryNotes,
-      userText: text,
-    });
 
-    const proposals = result.proposals.map((p) => ({
-      id: crypto.randomUUID(),
-      tool: p.tool,
-      args: p.args,
-      summary: p.summary,
-      status: "pending" as const,
-    }));
-
-    await appendChatMessages([
-      { role: "user" as const, content: text },
-      { role: "assistant" as const, content: result.reply, proposals },
-    ]);
-
-    const messages = await listChatMessages();
-    return NextResponse.json({ messages });
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "AI 调用失败" },
-      { status: 502 },
-    );
+  // 对话摘要滚动窗口：超阈值时把旧消息压缩进 chatSummary
+  let history = db.chatMessages;
+  let summary = db.chatSummary;
+  const split = splitForSummary(history);
+  if (split) {
+    try {
+      summary = await summarizeChat(summary, split.toSummarize);
+      await setChatSummary(summary);
+      history = split.keep;
+    } catch {
+      /* 摘要失败不阻塞对话 */
+    }
   }
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      const send = (obj: unknown) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      try {
+        let reply = "";
+        const result = await streamAgentReply(
+          {
+            profile: db.agentProfile,
+            history,
+            context: buildAgentContext(db),
+            memoryNotes: db.memoryNotes,
+            summary,
+            userText: text,
+          },
+          (delta) => {
+            reply += delta;
+            send({ type: "token", text: delta });
+          },
+        );
+
+        const proposals = result.proposals.map((p) => ({
+          id: crypto.randomUUID(),
+          tool: p.tool,
+          args: p.args,
+          summary: p.summary,
+          status: "pending" as const,
+        }));
+
+        await appendChatMessages([
+          { role: "user" as const, content: text },
+          { role: "assistant" as const, content: result.reply, proposals },
+        ]);
+
+        // 后台提炼记忆笔记（不阻塞响应）
+        void extractMemoryFacts(text, result.reply, db.memoryNotes)
+          .then(async (facts) => {
+            for (const fact of facts) await addMemoryNote(fact);
+          })
+          .catch(() => {});
+
+        send({ type: "done", messages: await listChatMessages() });
+        controller.close();
+      } catch (e) {
+        send({ type: "error", error: e instanceof Error ? e.message : "AI 调用失败" });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }

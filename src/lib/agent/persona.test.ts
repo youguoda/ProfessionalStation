@@ -45,4 +45,24 @@ describe("assembleSystemPrompt", () => {
     );
     expect(s.indexOf("不要说废话。")).toBeLessThan(s.indexOf(BASE_RULES[0]));
   });
+
+  it("reply 模式：无工具段、要求纯文本", () => {
+    const s = assembleSystemPrompt(defaultAgentProfile(), "ctx", "tools", "mem", "reply", "");
+    expect(s).not.toContain("<可用工具");
+    expect(s).toContain("纯文本");
+    expect(s).not.toContain('"proposals"');
+  });
+
+  it("proposals 模式：含工具段与 proposals JSON 指令，含摘要", () => {
+    const s = assembleSystemPrompt(defaultAgentProfile(), "ctx", "tools", "mem", "proposals", "早期摘要内容");
+    expect(s).toContain("<可用工具");
+    expect(s).toContain('"proposals"');
+    expect(s).toContain("早期摘要内容");
+  });
+
+  it("chat 模式（默认）含摘要注入", () => {
+    const s = assembleSystemPrompt(defaultAgentProfile(), "ctx", "tools", "mem", "chat", "早期摘要内容");
+    expect(s).toContain("<对话早期摘要>");
+    expect(s).toContain("早期摘要内容");
+  });
 });

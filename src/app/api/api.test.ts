@@ -406,33 +406,58 @@ describe("API：马力 Agent", () => {
     expect((await postAgentChat(jsonReq("/api/agent/chat", { text: "" }))).status).toBe(400);
   });
 
-  it("chat 配置 key + mock fetch → 追加消息与待确认建议", async () => {
-    process.env.AI_API_KEY = "sk-test";
+  // 阶段 C：chat 为 SSE 流式。mock 上游：stream 调用返回 SSE 增量，其余返回 proposals JSON。
+  function mockAgentFetch(deltas: string[], proposals: unknown[]) {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (body.includes('"stream":true')) {
+          const sse =
+            deltas
+              .map(
+                (c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`,
+              )
+              .join("") + "data: [DONE]\n\n";
+          return new Response(sse, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }
+        return new Response(
           JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    reply: "今天先做写周报吧。",
-                    proposals: [
-                      { tool: "create_task", args: { title: "写周报" }, summary: "新建写周报任务" },
-                    ],
-                  }),
-                },
-              },
-            ],
+            choices: [{ message: { content: JSON.stringify({ proposals }) } }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
+        );
+      }),
     );
+  }
+
+  async function parseSseDone(res: Response): Promise<{
+    messages: Array<Record<string, unknown> & { id: string; content: string; role: string; proposals: Array<Record<string, unknown>> }>;
+  }> {
+    const raw = await res.text();
+    const doneLine = raw
+      .split("\n\n")
+      .map((s) => s.trim())
+      .find((s) => s.startsWith("data: ") && s.includes('"type":"done"'));
+    expect(doneLine).toBeDefined();
+    return JSON.parse(doneLine!.slice(5).trim());
+  }
+
+  it("chat 配置 key + mock fetch → SSE 流式追加消息与待确认建议", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockAgentFetch(["今天先做", "写周报吧。"], [
+      { tool: "create_task", args: { title: "写周报" }, summary: "新建写周报任务" },
+    ]);
     const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "今天先做什么？" }));
     expect(res.status).toBe(200);
-    const { messages } = await res.json();
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const raw = await res.clone().text();
+    expect(raw).toContain('"type":"token"');
+    const done = await parseSseDone(res);
+    const messages = done.messages;
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe("user");
     expect(messages[1].role).toBe("assistant");
@@ -444,30 +469,12 @@ describe("API：马力 Agent", () => {
 
   it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
     process.env.AI_API_KEY = "sk-test";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    reply: "建议完成这个任务。",
-                    proposals: [
-                      { tool: "mark_frog", args: { taskId: "t1", isFrog: true }, summary: "标记青蛙" },
-                    ],
-                  }),
-                },
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
-    );
-    const { messages } = await (await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }))).json();
-    const msg = messages[1];
+    mockAgentFetch(["建议完成这个任务。"], [
+      { tool: "mark_frog", args: { taskId: "t1", isFrog: true }, summary: "标记青蛙" },
+    ]);
+    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
+    const done = await parseSseDone(res);
+    const msg = done.messages[1];
     const pid = msg.proposals[0].id;
 
     const r1 = await postAgentProposalStatus(
@@ -496,18 +503,9 @@ describe("API：马力 Agent", () => {
 
   it("DELETE chat 清空对话", async () => {
     process.env.AI_API_KEY = "sk-test";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({ reply: "好", proposals: [] }) } }],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
-    );
-    await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
+    mockAgentFetch(["好"], []);
+    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
+    await parseSseDone(res);
     expect((await (await getAgentChat()).json()).length).toBe(2);
     expect((await clearAgentChat()).status).toBe(200);
     expect((await (await getAgentChat()).json()).length).toBe(0);

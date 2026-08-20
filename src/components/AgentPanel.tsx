@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
+import { api } from "@/lib/client/api";
 import { proposalLabel } from "@/lib/agent/tools";
 import type { ActionProposal, ChatMessage } from "@/lib/domain/types";
 import { AgentSettings } from "./AgentSettings";
@@ -113,27 +114,39 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const chatMessages = useStore((s) => s.chatMessages);
   const agentProfile = useStore((s) => s.agentProfile);
   const aiStatus = useStore((s) => s.aiStatus);
-  const sendChat = useStore((s) => s.sendChat);
   const clearChat = useStore((s) => s.clearChat);
+  const setChatMessages = useStore((s) => s.setChatMessages);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingUser, setPendingUser] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [chatMessages.length, showSettings]);
+  }, [chatMessages.length, showSettings, streaming, pendingUser]);
 
   async function submit() {
     const t = text.trim();
     if (!t || busy) return;
     setBusy(true);
     setError(null);
+    setText("");
+    setPendingUser(t);
+    setStreaming("");
     try {
-      await sendChat(t);
-      setText("");
+      const messages = await api.sendChatStream(t, (delta) =>
+        setStreaming((s) => s + delta),
+      );
+      setChatMessages(messages);
+      setPendingUser(null);
+      setStreaming("");
     } catch (e) {
+      setPendingUser(null);
+      setStreaming("");
+      setText(t); // 失败恢复输入，便于重发
       setError(e instanceof Error ? e.message : "发送失败");
     } finally {
       setBusy(false);
@@ -194,38 +207,54 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                   也可以让我提建议，我会列出来等你确认。
                 </div>
               ) : (
-                chatMessages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
+                <>
+                  {chatMessages.map((m) => (
                     <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                        m.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "border bg-muted/40"
-                      }`}
+                      key={m.id}
+                      className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                     >
-                      <div className="whitespace-pre-wrap">{m.content}</div>
-                      {m.proposals.length > 0 ? (
-                        <div className="mt-2 space-y-1.5">
-                          {m.proposals.map((p) => (
-                            <ProposalCard key={p.id} message={m} proposal={p} />
-                          ))}
-                        </div>
-                      ) : null}
+                      <div
+                        className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+                          m.role === "user"
+                            ? "bg-primary text-primary-foreground"
+                            : "border bg-muted/40"
+                        }`}
+                      >
+                        <div className="whitespace-pre-wrap">{m.content}</div>
+                        {m.proposals.length > 0 ? (
+                          <div className="mt-2 space-y-1.5">
+                            {m.proposals.map((p) => (
+                              <ProposalCard key={p.id} message={m} proposal={p} />
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                  {pendingUser ? (
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+                        {pendingUser}
+                      </div>
+                    </div>
+                  ) : null}
+                  {busy ? (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-xl border bg-muted/40 px-3 py-2 text-sm">
+                        {streaming ? (
+                          <span className="whitespace-pre-wrap">
+                            {streaming}
+                            <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">{name}正在思考…</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                  {error ? <p className="text-center text-xs text-red-500">{error}</p> : null}
+                </>
               )}
-              {busy ? (
-                <div className="flex justify-start">
-                  <div className="rounded-xl border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                    {name}正在思考…
-                  </div>
-                </div>
-              ) : null}
-              {error ? <p className="text-center text-xs text-red-500">{error}</p> : null}
             </div>
 
             <div className="border-t p-3">

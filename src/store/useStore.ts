@@ -79,6 +79,7 @@ interface AppState {
   setAgentOpen: (open: boolean) => void;
   saveAgentProfile: (patch: Record<string, unknown>) => Promise<AgentProfile>;
   sendChat: (text: string) => Promise<void>;
+  setChatMessages: (messages: ChatMessage[]) => void;
   clearChat: () => Promise<void>;
   resolveProposal: (
     messageId: string,
@@ -269,9 +270,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   sendChat: async (text) => {
-    const { messages } = await api.sendChat(text);
+    const messages = await api.sendChatStream(text, () => {});
     set({ chatMessages: messages });
   },
+
+  setChatMessages: (messages) => set({ chatMessages: messages }),
 
   clearChat: async () => {
     await api.clearChat();

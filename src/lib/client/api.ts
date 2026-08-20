@@ -8,6 +8,7 @@ import type {
   Tag,
   Task,
 } from "@/lib/domain/types";
+import { readSse } from "./stream";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 import type { SlotSuggestion } from "@/lib/engine/scheduler";
 
@@ -97,11 +98,27 @@ export const api = {
 
   chatMessages: () => request<ChatMessage[]>("/api/agent/chat"),
 
-  sendChat: (text: string) =>
-    request<{ messages: ChatMessage[] }>("/api/agent/chat", {
+  sendChatStream: async (
+    text: string,
+    onToken: (delta: string) => void,
+  ): Promise<ChatMessage[]> => {
+    const res = await fetch("/api/agent/chat", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
-    }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `请求失败（${res.status}）`);
+    }
+    return new Promise<ChatMessage[]>((resolve, reject) => {
+      readSse(res, (ev) => {
+        if (ev.type === "token" && ev.text) onToken(ev.text);
+        if (ev.type === "done" && ev.messages) resolve(ev.messages);
+        if (ev.type === "error") reject(new Error(ev.error ?? "AI 调用失败"));
+      }).catch(reject);
+    });
+  },
 
   clearChat: () => request<{ ok: boolean }>("/api/agent/chat", { method: "DELETE" }),
 

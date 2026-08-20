@@ -141,5 +141,6 @@ export function emptyDb(): Db {
     agentProfile: defaultAgentProfile(),
     chatMessages: [],
     memoryNotes: [],
+    chatSummary: "",
   };
 }

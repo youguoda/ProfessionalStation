@@ -75,6 +75,7 @@ function normalizeDb(raw: Partial<Db>): Db {
     },
     chatMessages: Array.isArray(db.chatMessages) ? db.chatMessages : [],
     memoryNotes: Array.isArray(db.memoryNotes) ? db.memoryNotes : [],
+    chatSummary: typeof db.chatSummary === "string" ? db.chatSummary : "",
     settings: {
       ...defaults.settings,
       ...s,
@@ -453,6 +454,18 @@ export async function updateAgentProfile(
 export async function listChatMessages(): Promise<ChatMessage[]> {
   const db = await readDb();
   return db.chatMessages;
+}
+
+export async function getChatSummary(): Promise<string> {
+  const db = await readDb();
+  return db.chatSummary;
+}
+
+export async function setChatSummary(summary: string): Promise<string> {
+  return mutate((db) => {
+    db.chatSummary = summary.trim().slice(0, 4000);
+    return db.chatSummary;
+  });
 }
 
 export async function appendChatMessages(
