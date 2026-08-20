@@ -1,4 +1,4 @@
-import type { Priority, Project, Settings, Task } from "@/lib/domain/types";
+import type { Priority, Project, ScopeId, Settings, Task } from "@/lib/domain/types";
 
 /**
  * 视图投影（纯函数）：把统一的任务数据投影为各方法论视图所需的数据。
@@ -120,6 +120,102 @@ export function selectOverdue(tasks: Task[], now: Date = new Date()): Task[] {
     .filter((t) => t.phase === "action" && t.status !== "done" && t.status !== "canceled")
     .filter((t) => t.dueDate !== null && t.dueDate < todayStr)
     .sort(byOrderThenPriority);
+}
+
+/** 未来 7 天（Upcoming）：截止或排期落在 [今天, 今天+7] 的任务，按日期排序 */
+export function selectUpcoming(tasks: Task[], now: Date = new Date()): Task[] {
+  const today = isoDay(now);
+  const end = new Date(now);
+  end.setDate(end.getDate() + 7);
+  const endStr = isoDay(end);
+  return tasks
+    .filter((t) => t.phase === "action" && t.status !== "done" && t.status !== "canceled")
+    .filter((t) => {
+      const d = t.dueDate ?? t.scheduledAt?.slice(0, 10) ?? null;
+      return d !== null && d >= today && d <= endStr;
+    })
+    .sort((a, b) => {
+      const da = a.dueDate ?? a.scheduledAt?.slice(0, 10) ?? "";
+      const db = b.dueDate ?? b.scheduledAt?.slice(0, 10) ?? "";
+      return da < db ? -1 : 1;
+    });
+}
+
+/** 已完成日志：按完成时间倒序 */
+export function selectLog(tasks: Task[]): Task[] {
+  return tasks
+    .filter((t) => t.status === "done" || t.status === "canceled")
+    .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+}
+
+/** 是否需要周回顾：最近一次回顾距今已 7 天（或从未回顾） */
+export function needsWeeklyReview(
+  reviews: Array<{ date: string }>,
+  now: Date = new Date(),
+): boolean {
+  const dates = reviews.map((r) => r.date).sort();
+  const last = dates[dates.length - 1];
+  if (!last) return true;
+  const lastMs = new Date(last + "T00:00:00Z").getTime();
+  const todayMs = new Date(isoDay(now) + "T00:00:00Z").getTime();
+  return (todayMs - lastMs) / 86400000 >= 7;
+}
+
+/** 范围 → 任务列表（列表视图用，排除已完成） */
+export function tasksForScope(scope: ScopeId, tasks: Task[]): Task[] {
+  switch (scope) {
+    case "inbox":
+      return selectInbox(tasks);
+    case "today":
+      return selectToday(tasks);
+    case "upcoming":
+      return selectUpcoming(tasks);
+    case "anytime":
+      return selectNextActions(tasks);
+    case "waiting":
+      return selectWaiting(tasks);
+    case "someday":
+      return selectSomeday(tasks);
+    case "trash":
+      return selectTrash(tasks);
+    default:
+      break;
+  }
+  if (scope.startsWith("project:")) {
+    const id = scope.slice("project:".length);
+    return tasks.filter(
+      (t) =>
+        t.projectId === id &&
+        t.phase !== "trash" &&
+        t.status !== "done" &&
+        t.status !== "canceled",
+    );
+  }
+  if (scope.startsWith("area:")) {
+    const id = scope.slice("area:".length);
+    return tasks.filter(
+      (t) =>
+        t.areaId === id &&
+        t.phase !== "trash" &&
+        t.status !== "done" &&
+        t.status !== "canceled",
+    );
+  }
+  return [];
+}
+
+/** 范围 → action 任务源（看板/四象限用，含已完成以便看板 done 列） */
+export function scopeSource(scope: ScopeId, tasks: Task[]): Task[] {
+  if (scope.startsWith("project:")) {
+    const id = scope.slice("project:".length);
+    return tasks.filter((t) => t.phase === "action" && t.projectId === id);
+  }
+  if (scope.startsWith("area:")) {
+    const id = scope.slice("area:".length);
+    return tasks.filter((t) => t.phase === "action" && t.areaId === id);
+  }
+  const ids = new Set(tasksForScope(scope, tasks).map((t) => t.id));
+  return tasks.filter((t) => t.phase === "action" && ids.has(t.id));
 }
 
 export function selectReviewStats(

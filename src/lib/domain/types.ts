@@ -128,6 +128,27 @@ export interface AutomationSettings {
 
 export type ThemeMode = "light" | "dark" | "system";
 
+/** 导航范围（做什么 / 组织 / 回顾），视图模式与范围分离 */
+export type ScopeId =
+  | "inbox"
+  | "today"
+  | "upcoming"
+  | "anytime"
+  | "waiting"
+  | "someday"
+  | "para"
+  | "habits"
+  | "review"
+  | "log"
+  | "automation"
+  | "settings"
+  | "trash"
+  | `project:${string}`
+  | `area:${string}`;
+
+/** 显示模式：作用于「当前所选范围」 */
+export type DisplayMode = "list" | "kanban" | "matrix" | "timeblock";
+
 export interface Settings {
   /** 全局默认工作流模式 */
   defaultMode: WorkflowMode;
@@ -196,6 +217,8 @@ export interface Db {
   habits: Habit[];
   habitChecks: HabitCheck[];
   weeklyReviews: WeeklyReview[];
+  /** 周回顾进行中的草稿（持久化，中途切走不丢） */
+  weeklyReviewDraft: { checklist: Record<string, boolean>; notes: string };
   settings: Settings;
   agentProfile: AgentProfile;
   chatMessages: ChatMessage[];

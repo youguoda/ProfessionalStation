@@ -67,6 +67,17 @@ function normalizeDb(raw: Partial<Db>): Db {
     habits: Array.isArray(db.habits) ? db.habits : [],
     habitChecks: Array.isArray(db.habitChecks) ? db.habitChecks : [],
     weeklyReviews: Array.isArray(db.weeklyReviews) ? db.weeklyReviews : [],
+    weeklyReviewDraft:
+      db.weeklyReviewDraft && typeof db.weeklyReviewDraft === "object"
+        ? {
+            checklist:
+              db.weeklyReviewDraft.checklist &&
+              typeof db.weeklyReviewDraft.checklist === "object"
+                ? db.weeklyReviewDraft.checklist
+                : {},
+            notes: typeof db.weeklyReviewDraft.notes === "string" ? db.weeklyReviewDraft.notes : "",
+          }
+        : { checklist: {}, notes: "" },
     agentProfile: {
       ...defaultAgentProfile(),
       ...(db.agentProfile ?? {}),
@@ -445,7 +456,25 @@ export async function createWeeklyReview(input: {
       updatedAt: now,
     };
     db.weeklyReviews.push(review);
+    db.weeklyReviewDraft = { checklist: {}, notes: "" };
     return review;
+  });
+}
+
+export async function getWeeklyReviewDraft(): Promise<Db["weeklyReviewDraft"]> {
+  const db = await readDb();
+  return db.weeklyReviewDraft;
+}
+
+export async function setWeeklyReviewDraft(
+  draft: Db["weeklyReviewDraft"],
+): Promise<Db["weeklyReviewDraft"]> {
+  return mutate((db) => {
+    db.weeklyReviewDraft = {
+      checklist: draft.checklist ?? {},
+      notes: typeof draft.notes === "string" ? draft.notes : "",
+    };
+    return db.weeklyReviewDraft;
   });
 }
 

@@ -17,9 +17,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "@/store/useStore";
-import { selectKanban } from "@/lib/engine/selectors";
+import { scopeSource, selectKanban } from "@/lib/engine/selectors";
 import { PRIORITY_SHORT, STATUS_LABELS } from "@/lib/domain/constants";
-import type { Status, Task } from "@/lib/domain/types";
+import type { ScopeId, Status, Task } from "@/lib/domain/types";
 import { toastError } from "@/store/useToast";
 import { formatRelativeDate } from "@/lib/parsing/dateFormat";
 
@@ -102,7 +102,7 @@ function Column({
   );
 }
 
-export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
+export function KanbanView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
   const transition = useStore((s) => s.transition);
@@ -110,7 +110,7 @@ export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
   const [showWip, setShowWip] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const columns = selectKanban(tasks, settings).filter((c) =>
+  const columns = selectKanban(scopeSource(scope, tasks), settings).filter((c) =>
     COLUMNS.includes(c.status as Status),
   );
 

@@ -2,22 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Bot, Moon, Palette, Search } from "lucide-react";
-import { useStore, type ViewId } from "@/store/useStore";
+import { useStore } from "@/store/useStore";
 import { nextTheme, THEME_LABELS } from "@/lib/client/theme";
+import type { ScopeId } from "@/lib/domain/types";
 
-const VIEW_ITEMS: Array<{ id: ViewId; label: string }> = [
+const SCOPE_ITEMS: Array<{ id: ScopeId; label: string }> = [
   { id: "inbox", label: "收件箱" },
   { id: "today", label: "今天" },
-  { id: "next", label: "下一步行动" },
+  { id: "upcoming", label: "未来 7 天" },
+  { id: "anytime", label: "随时（下一步）" },
   { id: "waiting", label: "等待" },
   { id: "someday", label: "将来/也许" },
-  { id: "kanban", label: "看板" },
-  { id: "matrix", label: "四象限" },
-  { id: "para", label: "PARA" },
-  { id: "timeblock", label: "时间块" },
+  { id: "para", label: "PARA 总览" },
   { id: "habits", label: "习惯" },
-  { id: "automation", label: "自动化" },
   { id: "review", label: "周回顾" },
+  { id: "log", label: "已完成日志" },
+  { id: "automation", label: "自动化" },
+  { id: "settings", label: "设置" },
   { id: "trash", label: "回收站" },
 ];
 
@@ -31,11 +32,10 @@ interface Item {
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen);
   const setOpen = useStore((s) => s.setPaletteOpen);
-  const setView = useStore((s) => s.setView);
+  const setScope = useStore((s) => s.setScope);
   const projects = useStore((s) => s.projects);
   const tasks = useStore((s) => s.tasks);
   const openTask = useStore((s) => s.openTask);
-  const setProjectFilter = useStore((s) => s.setProjectFilter);
   const setTheme = useStore((s) => s.setTheme);
   const theme = useStore((s) => s.settings.theme);
   const setAgentOpen = useStore((s) => s.setAgentOpen);
@@ -65,13 +65,13 @@ export function CommandPalette() {
   }, [open]);
 
   const items = useMemo<Item[]>(() => {
-    const views = VIEW_ITEMS.filter(
+    const scopes = SCOPE_ITEMS.filter(
       (v) => !q || v.label.includes(q) || v.id.includes(q),
     ).map((v) => ({
-      key: `v-${v.id}`,
+      key: `s-${v.id}`,
       icon: <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />,
-      label: `视图：${v.label}`,
-      run: () => setView(v.id),
+      label: `去：${v.label}`,
+      run: () => setScope(v.id),
     }));
 
     const projs = projects
@@ -79,12 +79,11 @@ export function CommandPalette() {
       .slice(0, 6)
       .map((p) => ({
         key: `p-${p.id}`,
-        icon: <span className="h-3.5 w-3.5 text-center text-[10px] leading-3.5 text-muted-foreground">#</span>,
+        icon: (
+          <span className="h-3.5 w-3.5 text-center text-[10px] leading-3.5 text-muted-foreground">#</span>
+        ),
         label: `项目：${p.name}`,
-        run: () => {
-          setView("next");
-          setProjectFilter(p.id);
-        },
+        run: () => setScope(`project:${p.id}`),
       }));
 
     const taskItems = tasks
@@ -92,7 +91,9 @@ export function CommandPalette() {
       .slice(0, 6)
       .map((t) => ({
         key: `t-${t.id}`,
-        icon: <span className="h-3.5 w-3.5 text-center text-[10px] leading-3.5 text-muted-foreground">✓</span>,
+        icon: (
+          <span className="h-3.5 w-3.5 text-center text-[10px] leading-3.5 text-muted-foreground">✓</span>
+        ),
         label: `任务：${t.title}`,
         run: () => openTask(t.id),
       }));
@@ -121,8 +122,8 @@ export function CommandPalette() {
       },
     ].filter((a) => !q || a.label.includes(q));
 
-    return [...views, ...projs, ...taskItems, ...actions];
-  }, [q, projects, tasks, setView, setProjectFilter, openTask, setAgentOpen, setTheme, theme, setOpen]);
+    return [...scopes, ...projs, ...taskItems, ...actions];
+  }, [q, projects, tasks, setScope, openTask, setAgentOpen, setTheme, theme, setOpen]);
 
   useEffect(() => {
     setIdx((i) => Math.min(i, Math.max(0, items.length - 1)));

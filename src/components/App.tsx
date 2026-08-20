@@ -17,11 +17,18 @@ import { TaskDetail } from "./TaskDetail";
 import { AgentPanel } from "./AgentPanel";
 import { ToastViewport } from "./ToastViewport";
 import { CommandPalette } from "./CommandPalette";
+import { LogView } from "./LogView";
+import { ProjectDetailView } from "./ProjectDetailView";
+import { SettingsView } from "./SettingsView";
+import { ModeSwitcher } from "./ModeSwitcher";
 import { triggerUndo } from "@/store/useToast";
+
+const LIST_SCOPES = ["inbox", "today", "upcoming", "anytime", "waiting", "someday", "trash"];
 
 export function App() {
   const load = useStore((s) => s.load);
-  const view = useStore((s) => s.view);
+  const scope = useStore((s) => s.scope);
+  const mode = useStore((s) => s.mode);
   const loaded = useStore((s) => s.loaded);
   const error = useStore((s) => s.error);
   const agentOpen = useStore((s) => s.agentOpen);
@@ -85,7 +92,38 @@ export function App() {
     );
   }
 
-  const isBoard = view === "kanban" || view === "matrix" || view === "timeblock";
+  const isTaskScope =
+    LIST_SCOPES.includes(scope) || scope.startsWith("project:") || scope.startsWith("area:");
+  const wide = isTaskScope && mode !== "list";
+
+  function MainContent() {
+    if (scope === "habits") return <HabitsView />;
+    if (scope === "review") return <WeeklyReviewView />;
+    if (scope === "automation") return <AutomationView />;
+    if (scope === "settings") return <SettingsView />;
+    if (scope === "log") return <LogView onSelect={openTask} />;
+    if (scope === "para") return <ParaView onSelect={openTask} />;
+    if (scope.startsWith("project:")) {
+      return <ProjectDetailView projectId={scope.slice("project:".length)} onSelect={openTask} />;
+    }
+    if (scope.startsWith("area:")) return <ListView scope={scope} onSelect={openTask} />;
+
+    // 任务范围：视图模式作用于当前范围
+    return (
+      <div>
+        <ModeSwitcher />
+        {mode === "list" ? (
+          <ListView scope={scope} onSelect={openTask} />
+        ) : mode === "kanban" ? (
+          <KanbanView scope={scope} onSelect={openTask} />
+        ) : mode === "matrix" ? (
+          <MatrixView scope={scope} onSelect={openTask} />
+        ) : (
+          <TimeBlockView onSelect={openTask} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -93,36 +131,16 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <CaptureBar />
         <main className="flex-1 overflow-y-auto p-6">
-          {isBoard ? (
-            <div>
-              {view === "kanban" ? (
-                <KanbanView onSelect={openTask} />
-              ) : view === "matrix" ? (
-                <MatrixView onSelect={openTask} />
-              ) : (
-                <TimeBlockView onSelect={openTask} />
-              )}
-            </div>
+          {wide ? (
+            <MainContent />
           ) : (
             <div className="mx-auto max-w-4xl">
-              {view === "review" ? (
-                <WeeklyReviewView />
-              ) : view === "para" ? (
-                <ParaView onSelect={openTask} />
-              ) : view === "habits" ? (
-                <HabitsView />
-              ) : view === "automation" ? (
-                <AutomationView />
-              ) : (
-                <ListView view={view} onSelect={openTask} />
-              )}
+              <MainContent />
             </div>
           )}
         </main>
       </div>
-      {selectedTaskId ? (
-        <TaskDetail id={selectedTaskId} onClose={closeTask} />
-      ) : null}
+      {selectedTaskId ? <TaskDetail id={selectedTaskId} onClose={closeTask} /> : null}
       {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
       {!selectedTaskId && !agentOpen ? <PomodoroDock /> : null}
       <ToastViewport />

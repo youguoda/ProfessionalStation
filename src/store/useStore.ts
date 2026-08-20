@@ -7,30 +7,17 @@ import type {
   Area,
   ChatMessage,
   Db,
+  DisplayMode,
   Habit,
   HabitCheck,
   Project,
+  ScopeId,
   Tag,
   Task,
   ThemeMode,
 } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 import { applyTheme } from "@/lib/client/theme";
-
-export type ViewId =
-  | "inbox"
-  | "next"
-  | "today"
-  | "kanban"
-  | "matrix"
-  | "waiting"
-  | "someday"
-  | "para"
-  | "timeblock"
-  | "habits"
-  | "automation"
-  | "review"
-  | "trash";
 
 interface AppState {
   loaded: boolean;
@@ -50,16 +37,14 @@ interface AppState {
   agentProfile: AgentProfile | null;
   chatMessages: ChatMessage[];
 
-  view: ViewId;
+  scope: ScopeId;
+  mode: DisplayMode;
   search: string;
-  projectFilter: string | null;
-  areaFilter: string | null;
 
   load: () => Promise<void>;
-  setView: (view: ViewId) => void;
+  setScope: (scope: ScopeId) => void;
+  setMode: (mode: DisplayMode) => void;
   setSearch: (q: string) => void;
-  setProjectFilter: (id: string | null) => void;
-  setAreaFilter: (id: string | null) => void;
 
   addTask: (input: Record<string, unknown>) => Promise<Task>;
   transition: (id: string, event: TaskEvent) => Promise<Task>;
@@ -129,10 +114,9 @@ export const useStore = create<AppState>((set, get) => ({
   paletteOpen: false,
   selectedTaskId: null,
 
-  view: "today",
+  scope: "today",
+  mode: "list",
   search: "",
-  projectFilter: null,
-  areaFilter: null,
 
   load: async () => {
     set({ loading: true, error: null });
@@ -169,10 +153,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  setView: (view) => set({ view, search: "" }),
+  setScope: (scope) => set({ scope, search: "" }),
+  setMode: (mode) => set({ mode }),
   setSearch: (search) => set({ search }),
-  setProjectFilter: (projectFilter) => set({ projectFilter }),
-  setAreaFilter: (areaFilter) => set({ areaFilter }),
 
   addTask: async (input) => {
     const task = await api.createTask(input);

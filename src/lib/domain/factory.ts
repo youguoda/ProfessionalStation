@@ -130,6 +130,7 @@ export function emptyDb(): Db {
     habits: [],
     habitChecks: [],
     weeklyReviews: [],
+    weeklyReviewDraft: { checklist: {}, notes: "" },
     settings: {
       defaultMode: "gtd",
       kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },

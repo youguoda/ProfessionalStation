@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
+import { api } from "@/lib/client/api";
 import { selectReviewStats } from "@/lib/engine/selectors";
+import { toastError } from "@/store/useToast";
 
 const CHECKLIST = [
   "清空收件箱（逐条澄清）",
@@ -23,6 +25,34 @@ export function WeeklyReviewView() {
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
+  const loadedDraft = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 载入持久化草稿（中途切走不丢）
+  useEffect(() => {
+    api
+      .reviewState()
+      .then(({ draft }) => {
+        if (!loadedDraft.current) {
+          setChecks(draft.checklist ?? {});
+          setNotes(draft.notes ?? "");
+          loadedDraft.current = true;
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // 草稿自动保存（防抖）
+  useEffect(() => {
+    if (!loadedDraft.current) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      api.saveReviewDraft(checks, notes).catch((e) => toastError(e));
+    }, 600);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [checks, notes]);
 
   const stats = selectReviewStats(tasks, projects);
 
@@ -38,7 +68,7 @@ export function WeeklyReviewView() {
     <div>
       <h1 className="mb-1 text-xl font-semibold tracking-tight">周回顾</h1>
       <p className="mb-5 text-xs text-muted-foreground">
-        定期反思是 GTD / Scrum / Kaizen 的共同核心，让系统保持可信。
+        定期反思是 GTD / Scrum / Kaizen 的共同核心，让系统保持可信。进度会自动保存。
       </p>
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -81,7 +111,7 @@ export function WeeklyReviewView() {
         onClick={submit}
         className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
       >
-        {saved ? "已保存 ✓" : "保存周回顾"}
+        {saved ? "已保存 ✓" : "完成并保存周回顾"}
       </button>
 
       {weeklyReviews.length > 0 ? (

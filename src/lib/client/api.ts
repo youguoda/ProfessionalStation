@@ -63,6 +63,15 @@ export const api = {
       body: JSON.stringify({ notes, checklist }),
     }),
 
+  reviewState: () =>
+    request<{ reviews: Db["weeklyReviews"]; draft: Db["weeklyReviewDraft"] }>("/api/reviews"),
+
+  saveReviewDraft: (checklist: Record<string, boolean>, notes: string) =>
+    request<Db["weeklyReviewDraft"]>("/api/reviews", {
+      method: "PATCH",
+      body: JSON.stringify({ checklist, notes }),
+    }),
+
   createHabit: (name: string, icon?: string) =>
     request<Habit>("/api/habits", { method: "POST", body: JSON.stringify({ name, icon }) }),
 

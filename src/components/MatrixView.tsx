@@ -2,8 +2,9 @@
 
 import { useMemo } from "react";
 import { useStore } from "@/store/useStore";
-import { blockedIdSet, selectMatrix } from "@/lib/engine/selectors";
+import { blockedIdSet, scopeSource, selectMatrix } from "@/lib/engine/selectors";
 import { useTaskMeta } from "@/lib/client/useTaskMeta";
+import type { ScopeId } from "@/lib/domain/types";
 import { TaskItem } from "./TaskItem";
 
 const QUADRANT_STYLE: Record<string, string> = {
@@ -13,11 +14,11 @@ const QUADRANT_STYLE: Record<string, string> = {
   q4: "border-quadrant-4/30 bg-quadrant-4/10",
 };
 
-export function MatrixView({ onSelect }: { onSelect: (id: string) => void }) {
+export function MatrixView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const meta = useTaskMeta();
   const blockedIds = useMemo(() => blockedIdSet(tasks), [tasks]);
-  const quadrants = selectMatrix(tasks);
+  const quadrants = selectMatrix(scopeSource(scope, tasks));
 
   return (
     <div>

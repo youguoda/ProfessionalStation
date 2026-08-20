@@ -1,101 +1,139 @@
 "use client";
 
-import { useStore, type ViewId } from "@/store/useStore";
+import { useMemo } from "react";
 import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import { useStore } from "@/store/useStore";
+import {
+  needsWeeklyReview,
   selectInbox,
   selectNextActions,
   selectSomeday,
   selectToday,
   selectTrash,
+  selectUpcoming,
   selectWaiting,
+  tasksForScope,
 } from "@/lib/engine/selectors";
-import type { Task } from "@/lib/domain/types";
+import { formatRelativeDate } from "@/lib/parsing/dateFormat";
+import { toastError } from "@/store/useToast";
+import type { ScopeId, Task } from "@/lib/domain/types";
 import { PageHeader, TaskList } from "./TaskList";
+import { TaskItem } from "./TaskItem";
+import { useTaskMeta } from "@/lib/client/useTaskMeta";
+import { blockedIdSet } from "@/lib/engine/selectors";
 
-export function ListView({
-  view,
-  onSelect,
-}: {
-  view: ViewId;
-  onSelect: (id: string) => void;
-}) {
+const SCOPE_META: Record<string, { title: string; subtitle: string; empty: string }> = {
+  inbox: { title: "收件箱", subtitle: "捕获的念头在这里澄清，收件箱永远可以清空", empty: "收件箱已清空 🎉" },
+  today: { title: "今天", subtitle: "逾期置顶 · 青蛙优先，一次一件", empty: "今天没有安排，享受空白" },
+  upcoming: { title: "未来 7 天", subtitle: "按天分组，可拖拽到其他日期", empty: "未来 7 天没有安排" },
+  anytime: { title: "随时（下一步）", subtitle: "所有可执行的下一步，按上下文分组", empty: "没有下一步行动" },
+  waiting: { title: "等待", subtitle: "等待他人或依赖的事，定期回顾", empty: "没有等待项" },
+  someday: { title: "将来/也许", subtitle: "现在不做，但值得保留的想法", empty: "暂时没有想法" },
+  trash: { title: "回收站", subtitle: "恢复或永久删除", empty: "回收站为空" },
+};
+
+function UpcomingGroup({ day, children }: { day: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `up-day-${day}`, data: { day } });
+  return (
+    <section>
+      <h3
+        ref={setNodeRef}
+        className={`mb-2 rounded px-2 py-1 text-xs font-semibold uppercase tracking-wide ${
+          isOver ? "bg-primary/10 text-primary" : "text-muted-foreground"
+        }`}
+      >
+        {formatRelativeDate(day)}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function DraggableRow({ task, children }: { task: Task; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: task.id,
+    data: { taskId: task.id },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform) }}
+      {...attributes}
+      {...listeners}
+      className={isDragging ? "opacity-50" : ""}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function ListView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const search = useStore((s) => s.search);
   const setSearch = useStore((s) => s.setSearch);
-  const projectFilter = useStore((s) => s.projectFilter);
-  const areaFilter = useStore((s) => s.areaFilter);
-  const setProjectFilter = useStore((s) => s.setProjectFilter);
-  const setAreaFilter = useStore((s) => s.setAreaFilter);
-  const projects = useStore((s) => s.projects);
+  const updateTask = useStore((s) => s.updateTask);
   const areas = useStore((s) => s.areas);
-  const tags = useStore((s) => s.tags);
+  const weeklyReviews = useStore((s) => s.weeklyReviews);
+  const setScope = useStore((s) => s.setScope);
+  const meta = useTaskMeta();
+  const blockedIds = useMemo(() => blockedIdSet(tasks), [tasks]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  let list: Task[];
-  let title = "";
-  let subtitle = "";
-  let empty = "";
-  let showFrog = false;
-
-  switch (view) {
-    case "inbox":
-      list = selectInbox(tasks);
-      title = "收件箱";
-      subtitle = "捕获的念头在这里澄清，收件箱永远可以清空";
-      empty = "收件箱已清空 🎉";
-      break;
-    case "today":
-      list = selectToday(tasks);
-      title = "今天";
-      subtitle = "青蛙优先，一次一件";
-      empty = "今天没有安排，享受空白";
-      showFrog = true;
-      break;
-    case "next":
-      list = selectNextActions(tasks);
-      title = "下一步行动";
-      subtitle = "所有可执行的下一步，按上下文分组";
-      empty = "没有下一步行动";
-      break;
-    case "waiting":
-      list = selectWaiting(tasks);
-      title = "等待";
-      subtitle = "等待他人或依赖的事，定期回顾";
-      empty = "没有等待项";
-      break;
-    case "someday":
-      list = selectSomeday(tasks);
-      title = "将来/也许";
-      subtitle = "现在不做，但值得保留的想法";
-      empty = "空";
-      break;
-    case "trash":
-      list = selectTrash(tasks);
-      title = "回收站";
-      subtitle = "恢复或永久删除";
-      empty = "回收站为空";
-      break;
-    default:
-      list = [];
-      empty = "";
+  const metaInfo = SCOPE_META[scope] ?? SCOPE_META.anytime;
+  let title = metaInfo.title;
+  let subtitle = metaInfo.subtitle;
+  let empty = metaInfo.empty;
+  if (scope.startsWith("area:")) {
+    const area = areas.find((a) => a.id === scope.slice("area:".length));
+    title = `${area?.icon ?? ""} ${area?.name ?? "领域"}`;
+    subtitle = "该领域的进行中任务";
+    empty = "该领域没有进行中的任务";
   }
+  let list = tasksForScope(scope, tasks);
+  if (scope === "anytime") list = selectNextActions(tasks);
 
-  // 过滤
   if (search) {
     const q = search.toLowerCase();
     list = list.filter(
       (t) => t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q),
     );
   }
-  if (projectFilter) list = list.filter((t) => t.projectId === projectFilter);
-  if (areaFilter) list = list.filter((t) => t.areaId === areaFilter);
 
   const groupBy =
-    view === "next"
+    scope === "anytime"
       ? (t: Task) => {
-          const ctx = t.contexts.map((id) => tags.find((g) => g.id === id)?.name).find(Boolean);
+          const ctx = t.contexts.map((id) => meta.tagMap.get(id)?.name).find(Boolean);
           return ctx ? `@${ctx}` : "未分类";
         }
       : undefined;
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over) return;
+    const day = over.data.current?.day as string | undefined;
+    if (day) {
+      updateTask(String(active.id), { dueDate: day }).catch((err) => toastError(err));
+    }
+  };
+
+  const renderItem = (t: Task) => (
+    <TaskItem
+      task={t}
+      meta={meta}
+      blocked={blockedIds.has(t.id)}
+      onSelect={onSelect}
+      showFrog={scope === "today"}
+    />
+  );
 
   return (
     <div>
@@ -108,61 +146,70 @@ export function ListView({
         />
       </PageHeader>
 
-      {search || projectFilter || areaFilter ? (
-        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+      {search ? (
+        <div className="mb-4 flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">筛选：</span>
-          {search ? (
-            <span className="flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5">
-              搜索「{search}」
-              <button
-                onClick={() => setSearch("")}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                ✕
-              </button>
-            </span>
-          ) : null}
-          {projectFilter ? (
-            <span className="flex items-center gap-1 rounded-full border bg-primary/10 px-2 py-0.5 text-primary">
-              #{projects.find((p) => p.id === projectFilter)?.name ?? "项目"}
-              <button
-                onClick={() => setProjectFilter(null)}
-                className="hover:text-foreground"
-              >
-                ✕
-              </button>
-            </span>
-          ) : null}
-          {areaFilter ? (
-            <span className="flex items-center gap-1 rounded-full border bg-primary/10 px-2 py-0.5 text-primary">
-              {areas.find((a) => a.id === areaFilter)?.icon}{" "}
-              {areas.find((a) => a.id === areaFilter)?.name ?? "领域"}
-              <button onClick={() => setAreaFilter(null)} className="hover:text-foreground">
-                ✕
-              </button>
-            </span>
-          ) : null}
-          <button
-            onClick={() => {
-              setSearch("");
-              setProjectFilter(null);
-              setAreaFilter(null);
-            }}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            清除全部
-          </button>
+          <span className="flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5">
+            搜索「{search}」
+            <button onClick={() => setSearch("")} className="text-muted-foreground hover:text-foreground">
+              ✕
+            </button>
+          </span>
         </div>
       ) : null}
 
-      <TaskList
-        title={title}
-        tasks={list}
-        onSelect={onSelect}
-        emptyText={empty}
-        showFrog={showFrog}
-        groupBy={groupBy}
-      />
+      {scope === "today" && needsWeeklyReview(weeklyReviews) ? (
+        <button
+          onClick={() => setScope("review")}
+          className="mb-4 flex w-full items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/10"
+        >
+          🔁 本周还没回顾 → 花 20 分钟让系统保持可信
+        </button>
+      ) : null}
+
+      {scope === "upcoming" ? (
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          {(() => {
+            const groups = new Map<string, Task[]>();
+            for (const t of list) {
+              const key = t.dueDate ?? t.scheduledAt?.slice(0, 10) ?? "未定";
+              if (!groups.has(key)) groups.set(key, []);
+              groups.get(key)!.push(t);
+            }
+            if (groups.size === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                  <p className="text-sm">{empty}</p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-6">
+                {[...groups.entries()].map(([day, items]) => (
+                  <UpcomingGroup key={day} day={day}>
+                    <div className="space-y-1.5">
+                      {items.map((t) => (
+                        <DraggableRow key={t.id} task={t}>
+                          {renderItem(t)}
+                        </DraggableRow>
+                      ))}
+                    </div>
+                  </UpcomingGroup>
+                ))}
+              </div>
+            );
+          })()}
+        </DndContext>
+      ) : (
+        <TaskList
+          title={title}
+          tasks={list}
+          onSelect={onSelect}
+          emptyText={empty}
+          showFrog={scope === "today"}
+          groupBy={groupBy}
+        />
+      )}
     </div>
   );
 }

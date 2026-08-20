@@ -11,6 +11,7 @@ import { api } from "@/lib/client/api";
 import { usePomodoro } from "@/store/usePomodoro";
 import { toastError } from "@/store/useToast";
 import { Markdown } from "@/lib/markdown";
+import { SearchSelect } from "./SearchSelect";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -288,30 +289,22 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
 
           <label className="text-xs text-muted-foreground">
             项目
-            <select
-              value={task.projectId ?? ""}
-              onChange={(e) => save({ projectId: e.target.value || null })}
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">无项目</option>
-              {projectOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <SearchSelect
+              value={task.projectId}
+              options={projectOptions.map((p) => ({ value: p.id, label: p.name }))}
+              onSelect={(v) => save({ projectId: v })}
+              placeholder="无项目"
+            />
           </label>
 
           <label className="text-xs text-muted-foreground">
             领域
-            <select
-              value={task.areaId ?? ""}
-              onChange={(e) => save({ areaId: e.target.value || null })}
-              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value="">无领域</option>
-              {areaOptions.map((a) => (
-                <option key={a.id} value={a.id}>{a.icon} {a.name}</option>
-              ))}
-            </select>
+            <SearchSelect
+              value={task.areaId}
+              options={areaOptions.map((a) => ({ value: a.id, label: `${a.icon} ${a.name}` }))}
+              onSelect={(v) => save({ areaId: v })}
+              placeholder="无领域"
+            />
           </label>
 
           <label className="text-xs text-muted-foreground">
@@ -428,20 +421,17 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           {depError ? (
             <p className="mb-1 text-xs text-destructive">{depError}</p>
           ) : null}
-          <select
-            onChange={(e) => {
-              if (e.target.value) addDependency(e.target.value);
-            }}
-            defaultValue=""
-            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          >
-            <option value="" disabled>添加依赖任务…</option>
-            {tasks
+          <SearchSelect
+            value={null}
+            allowClear={false}
+            options={tasks
               .filter((t) => t.id !== task.id && (t.phase === "action" || t.phase === "waiting"))
-              .map((t) => (
-                <option key={t.id} value={t.id}>{t.title}</option>
-              ))}
-          </select>
+              .map((t) => ({ value: t.id, label: t.title }))}
+            onSelect={(v) => {
+              if (v) addDependency(v);
+            }}
+            placeholder="添加依赖任务…"
+          />
         </div>
 
         {children.length > 0 ? (

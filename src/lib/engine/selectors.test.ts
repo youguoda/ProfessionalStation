@@ -8,9 +8,12 @@ import {
   isBlocked,
   isImportant,
   isUrgent,
+  needsWeeklyReview,
   quadrantOf,
+  scopeSource,
   selectInbox,
   selectKanban,
+  selectLog,
   selectMatrix,
   selectNextActions,
   selectOverdue,
@@ -19,7 +22,9 @@ import {
   selectSomeday,
   selectToday,
   selectTrash,
+  selectUpcoming,
   selectWaiting,
+  tasksForScope,
   wouldCreateCycle,
 } from "./selectors";
 
@@ -248,6 +253,49 @@ describe("isBlocked / selectReady", () => {
     expect(set.has(blocked.id)).toBe(true);
     expect(set.has(ready.id)).toBe(false);
     expect(set.has(dep.id)).toBe(false);
+  });
+});
+
+describe("selectUpcoming / selectLog / scope", () => {
+  it("Upcoming 含 7 天内截止与排期，按日期升序，排除超期", () => {
+    const tasks = [
+      createTask({ title: "明天", phase: "action", dueDate: "2025-01-09" }),
+      createTask({ title: "第七天", phase: "action", dueDate: "2025-01-15" }),
+      createTask({ title: "第八天", phase: "action", dueDate: "2025-01-16" }),
+      createTask({ title: "排期今天", phase: "action", scheduledAt: "2025-01-08T15:00:00" }),
+      createTask({ title: "超期", phase: "action", dueDate: "2025-01-07" }),
+    ];
+    expect(selectUpcoming(tasks, now).map((t) => t.title)).toEqual([
+      "排期今天",
+      "明天",
+      "第七天",
+    ]);
+  });
+
+  it("selectLog 按完成时间倒序", () => {
+    const a = createTask({ title: "a", phase: "action", status: "done" });
+    a.completedAt = "2025-01-01T10:00:00.000Z";
+    const b = createTask({ title: "b", phase: "action", status: "done" });
+    b.completedAt = "2025-01-02T10:00:00.000Z";
+    const c = createTask({ title: "c", phase: "action", status: "todo" });
+    expect(selectLog([a, b, c]).map((t) => t.title)).toEqual(["b", "a"]);
+  });
+
+  it("tasksForScope / scopeSource 按项目与领域过滤", () => {
+    const p = createProject({ name: "P" });
+    const inP = createTask({ title: "项目任务", phase: "action", projectId: p.id });
+    const doneInP = createTask({ title: "已完成", phase: "action", projectId: p.id, status: "done" });
+    const out = createTask({ title: "无关", phase: "action" });
+    const list = tasksForScope(`project:${p.id}`, [inP, doneInP, out]);
+    expect(list.map((t) => t.title)).toEqual(["项目任务"]);
+    const src = scopeSource(`project:${p.id}`, [inP, doneInP, out]);
+    expect(src.map((t) => t.title).sort()).toEqual(["已完成", "项目任务"]);
+  });
+
+  it("needsWeeklyReview：从未回顾或超 7 天需回顾", () => {
+    expect(needsWeeklyReview([], now)).toBe(true);
+    expect(needsWeeklyReview([{ date: "2024-12-31" }], now)).toBe(true);
+    expect(needsWeeklyReview([{ date: "2025-01-05" }], now)).toBe(false);
   });
 });
 
