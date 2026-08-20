@@ -9,7 +9,9 @@ import {
   type NewTaskInput,
 } from "@/lib/domain/factory";
 import type { Area, Db, Project, Tag, Task } from "@/lib/domain/types";
+import { nextDueDate } from "@/lib/domain/repeat";
 import { transition, type TaskEvent, type TransitionResult } from "@/lib/engine/stateMachine";
+import { isBlocked } from "@/lib/engine/selectors";
 
 /**
  * 文件持久化仓储（MVP：单用户、低并发）。
@@ -100,8 +102,40 @@ export async function transitionTask(id: string, event: TaskEvent): Promise<Tran
   return mutate((db) => {
     const idx = db.tasks.findIndex((t) => t.id === id);
     if (idx < 0) return { ok: false as const, error: "任务不存在" };
-    const result = transition(db.tasks[idx], event);
-    if (result.ok) db.tasks[idx] = result.task;
+    const task = db.tasks[idx];
+
+    // 依赖阻断：被阻塞的任务不能开始执行
+    if (event.type === "start" && isBlocked(task, db.tasks)) {
+      return { ok: false as const, error: "存在未完成的依赖任务，无法开始" };
+    }
+
+    const result = transition(task, event);
+    if (result.ok) {
+      db.tasks[idx] = result.task;
+
+      // 重复任务：完成后自动生成下一次
+      if (result.task.status === "done" && result.task.repeatRule) {
+        const today = new Date().toISOString().slice(0, 10);
+        const baseDate = result.task.dueDate ?? today;
+        const nextDate = nextDueDate(result.task.repeatRule, baseDate) ?? baseDate;
+        const next = makeTask({
+          title: result.task.title,
+          notes: result.task.notes,
+          priority: result.task.priority,
+          effort: result.task.effort,
+          dueDate: nextDate,
+          projectId: result.task.projectId,
+          areaId: result.task.areaId,
+          tags: result.task.tags,
+          contexts: result.task.contexts,
+          repeatRule: result.task.repeatRule,
+          phase: "action",
+          status: "todo",
+        });
+        next.order = db.tasks.length;
+        db.tasks.push(next);
+      }
+    }
     return result;
   });
 }

@@ -19,6 +19,8 @@ const VIEWS: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: "someday", label: "将来/也许", icon: "🗓" },
   { id: "kanban", label: "看板", icon: "📋" },
   { id: "matrix", label: "四象限", icon: "🧭" },
+  { id: "para", label: "PARA", icon: "🗂" },
+  { id: "timeblock", label: "时间块", icon: "🕐" },
   { id: "review", label: "周回顾", icon: "🔁" },
   { id: "trash", label: "回收站", icon: "🗑" },
 ];
@@ -44,6 +46,8 @@ export function Sidebar() {
     someday: selectSomeday(tasks).length,
     kanban: tasks.filter((t) => t.phase === "action").length,
     matrix: tasks.filter((t) => t.phase === "action").length,
+    para: 0,
+    timeblock: tasks.filter((t) => t.scheduledAt).length,
     review: 0,
     trash: selectTrash(tasks).length,
   };
@@ -121,7 +125,7 @@ export function Sidebar() {
       <div className="mt-auto px-4 py-4 text-[11px] leading-relaxed text-muted-foreground">
         一个任务引擎 · 多种工作流
         <br />
-        GTD / 看板 / 四象限 / PARA
+        GTD / 看板 / 四象限 / PARA / 时间块
       </div>
     </aside>
   );

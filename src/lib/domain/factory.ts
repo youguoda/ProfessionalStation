@@ -29,6 +29,9 @@ export interface NewTaskInput {
   phase?: Task["phase"];
   status?: Task["status"];
   completedAt?: string | null;
+  blockedBy?: string[];
+  repeatRule?: string | null;
+  waitingFor?: string | null;
 }
 
 export function createTask(input: NewTaskInput): Task {
@@ -49,6 +52,9 @@ export function createTask(input: NewTaskInput): Task {
     projectId: input.projectId ?? null,
     areaId: input.areaId ?? null,
     parentId: input.parentId ?? null,
+    blockedBy: input.blockedBy ?? [],
+    repeatRule: input.repeatRule ?? null,
+    waitingFor: input.waitingFor ?? null,
     order: 0,
     tags: input.tags ?? [],
     contexts: input.contexts ?? [],

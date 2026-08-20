@@ -8,13 +8,15 @@ import { ListView } from "./ListView";
 import { KanbanView } from "./KanbanView";
 import { MatrixView } from "./MatrixView";
 import { WeeklyReviewView } from "./WeeklyReviewView";
+import { ParaView } from "./ParaView";
+import { TimeBlockView } from "./TimeBlockView";
+import { PomodoroDock } from "./PomodoroDock";
 import { TaskDetail } from "./TaskDetail";
 
 export function App() {
   const load = useStore((s) => s.load);
   const view = useStore((s) => s.view);
   const loaded = useStore((s) => s.loaded);
-  const loading = useStore((s) => s.loading);
   const error = useStore((s) => s.error);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -22,7 +24,7 @@ export function App() {
     load();
   }, [load]);
 
-  if (error) {
+  if (error && !loaded) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -39,7 +41,7 @@ export function App() {
     );
   }
 
-  if (!loaded || loading) {
+  if (!loaded) {
     return (
       <div className="flex h-screen items-center justify-center text-muted-foreground">
         加载中…
@@ -47,7 +49,7 @@ export function App() {
     );
   }
 
-  const isBoard = view === "kanban" || view === "matrix";
+  const isBoard = view === "kanban" || view === "matrix" || view === "timeblock";
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -59,14 +61,18 @@ export function App() {
             <div>
               {view === "kanban" ? (
                 <KanbanView onSelect={setSelectedId} />
-              ) : (
+              ) : view === "matrix" ? (
                 <MatrixView onSelect={setSelectedId} />
+              ) : (
+                <TimeBlockView onSelect={setSelectedId} />
               )}
             </div>
           ) : (
             <div className="mx-auto max-w-4xl">
               {view === "review" ? (
                 <WeeklyReviewView />
+              ) : view === "para" ? (
+                <ParaView onSelect={setSelectedId} />
               ) : (
                 <ListView view={view} onSelect={setSelectedId} />
               )}
@@ -77,6 +83,7 @@ export function App() {
       {selectedId ? (
         <TaskDetail id={selectedId} onClose={() => setSelectedId(null)} />
       ) : null}
+      <PomodoroDock />
     </div>
   );
 }

@@ -42,6 +42,12 @@ export interface Task {
   areaId: string | null;
   /** 父任务（子任务） */
   parentId: string | null;
+  /** 依赖：必须先完成的任务 id 列表 */
+  blockedBy: string[];
+  /** 重复规则：null | "daily" | "weekly" | "monthly" | "every:N:days" */
+  repeatRule: string | null;
+  /** 等待项：在等谁/什么 */
+  waitingFor: string | null;
   /** 列表内排序序号 */
   order: number;
   /** 标签 id */

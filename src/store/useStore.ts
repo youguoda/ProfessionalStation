@@ -13,6 +13,8 @@ export type ViewId =
   | "matrix"
   | "waiting"
   | "someday"
+  | "para"
+  | "timeblock"
   | "review"
   | "trash";
 
@@ -106,6 +108,10 @@ export const useStore = create<AppState>((set, get) => ({
   transition: async (id, event) => {
     const task = await api.transition(id, event);
     set({ tasks: upsert(get().tasks, task) });
+    // 重复任务完成时会在服务端生成下一次，重载同步新增实例
+    if (task.repeatRule && task.status === "done") {
+      await get().load();
+    }
     return task;
   },
 

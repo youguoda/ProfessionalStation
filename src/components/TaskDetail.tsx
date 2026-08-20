@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { EFFORT_OPTIONS, PHASE_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
+import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
+import { isBlocked } from "@/lib/engine/selectors";
 import type { Priority } from "@/lib/domain/types";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
@@ -187,6 +189,32 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             </select>
           </label>
 
+          <label className="text-xs text-muted-foreground">
+            重复
+            <select
+              value={task.repeatRule ?? ""}
+              onChange={(e) => save({ repeatRule: e.target.value || null })}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">不重复</option>
+              {REPEAT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          {task.phase === "waiting" ? (
+            <label className="text-xs text-muted-foreground">
+              等待谁/什么
+              <input
+                value={task.waitingFor ?? ""}
+                onChange={(e) => save({ waitingFor: e.target.value || null })}
+                placeholder="如：等客户回复"
+                className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+              />
+            </label>
+          ) : null}
+
           <label className="col-span-2 flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -231,6 +259,44 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             placeholder="如 @home / @办公室，回车添加"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           />
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>依赖（先完成才能开始）</span>
+            {isBlocked(task, tasks) ? <span className="text-amber-600">🔒 被阻塞</span> : null}
+          </div>
+          <div className="mb-2 flex flex-wrap gap-1">
+            {task.blockedBy.map((did) => {
+              const dep = tasks.find((t) => t.id === did);
+              return (
+                <span key={did} className="flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs">
+                  {dep ? dep.title : "已删除"}
+                  <button
+                    onClick={() => save({ blockedBy: task.blockedBy.filter((x) => x !== did) })}
+                    className="text-muted-foreground hover:text-red-500"
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
+            {task.blockedBy.length === 0 ? <span className="text-xs text-muted-foreground">无</span> : null}
+          </div>
+          <select
+            onChange={(e) => {
+              if (e.target.value) save({ blockedBy: [...task.blockedBy, e.target.value] });
+            }}
+            defaultValue=""
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="" disabled>添加依赖任务…</option>
+            {tasks
+              .filter((t) => t.id !== task.id && (t.phase === "action" || t.phase === "waiting"))
+              .map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+          </select>
         </div>
 
         <div className="mt-4">

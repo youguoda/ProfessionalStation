@@ -59,6 +59,7 @@ Task
   effort: 1|2|3|5|8          // 斐波那契
   dueDate, startDate, scheduledAt, completedAt
   projectId?, areaId?, parentId?, order
+  blockedBy[], repeatRule?, waitingFor?
   tags[], contexts[]
   isFrog: bool
   createdAt, updatedAt
@@ -97,7 +98,7 @@ Tag      id, name, kind: tag|context
 
 - **阶段 0**：文档落盘 + 脚手架 + 工程规范。
 - **阶段 1（MVP）**：状态机引擎、数据模型、极速捕获、五类视图、项目/领域/标签、优先级排序、搜索过滤、周回顾、快捷键。
-- **阶段 2**：PARA 树视图、时间块/日历、番茄、重复任务、依赖/Waiting 流转。
+- **阶段 2（已完成）**：PARA 树视图、时间块/日历周视图（拖拽排期）、番茄计时器（悬浮控件）、重复任务（完成后自动生成下一次）、依赖（`blockedBy` 阻断 start）与等待流转（`waitingFor`）。
 - **阶段 3**：自动化、习惯追踪、AI 辅助、多端同步/团队协作。
 
 ## 9. 边界情况与失败模式

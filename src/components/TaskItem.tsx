@@ -2,7 +2,7 @@
 
 import type { Task } from "@/lib/domain/types";
 import { PRIORITY_LABELS } from "@/lib/domain/constants";
-import { isoDay } from "@/lib/engine/selectors";
+import { isBlocked, isoDay } from "@/lib/engine/selectors";
 import { useStore } from "@/store/useStore";
 
 function dueMeta(task: Task): { text: string; danger: boolean } | null {
@@ -27,6 +27,7 @@ export function TaskItem({
   const projects = useStore((s) => s.projects);
   const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
+  const tasks = useStore((s) => s.tasks);
 
   const project = projects.find((p) => p.id === task.projectId);
   const area = areas.find((a) => a.id === task.areaId);
@@ -39,6 +40,7 @@ export function TaskItem({
 
   const done = task.status === "done" || task.status === "canceled";
   const due = dueMeta(task);
+  const blocked = isBlocked(task, tasks);
 
   async function run(e: React.MouseEvent, fn: () => Promise<unknown>) {
     e.stopPropagation();
@@ -94,6 +96,9 @@ export function TaskItem({
             <span key={t} className="rounded bg-muted px-1">{t}</span>
           ))}
           {task.isFrog ? <span>🐸</span> : null}
+          {task.repeatRule ? <span title="重复任务">🔁</span> : null}
+          {blocked ? <span title="被依赖阻塞" className="text-amber-500">🔒</span> : null}
+          {task.phase === "waiting" && task.waitingFor ? <span>⌛ {task.waitingFor}</span> : null}
         </div>
       </div>
 

@@ -146,3 +146,20 @@ export function isoDay(d: Date): string {
 export function priorityOf(task: Task): Priority {
   return task.priority;
 }
+
+/** 依赖判断：任务是否被未完成的依赖阻塞 */
+export function isBlocked(task: Task, tasks: Task[]): boolean {
+  if (task.blockedBy.length === 0) return false;
+  return task.blockedBy.some((id) => {
+    const dep = tasks.find((t) => t.id === id);
+    if (!dep) return false;
+    return dep.phase !== "trash" && dep.status !== "done" && dep.status !== "canceled";
+  });
+}
+
+/** 可执行的下一步行动（排除被阻塞的） */
+export function selectReady(tasks: Task[]): Task[] {
+  return tasks.filter(
+    (t) => t.phase === "action" && t.status === "todo" && !isBlocked(t, tasks),
+  );
+}
