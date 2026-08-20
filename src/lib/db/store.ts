@@ -64,6 +64,12 @@ async function mutate<T>(fn: (db: Db) => T | Promise<T>): Promise<T> {
   });
 }
 
+/** 仅测试用：清空内存缓存与写队列，配合临时 DATA_DIR 重置存储状态 */
+export function __resetStore() {
+  dbCache = null;
+  queue = Promise.resolve();
+}
+
 // ---- Task ----
 
 export async function listTasks(): Promise<Task[]> {

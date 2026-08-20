@@ -22,8 +22,10 @@ const DAY = 24 * 60 * 60 * 1000;
 
 function daysUntil(dueDate: string | null, now: Date): number {
   if (!dueDate) return Infinity;
-  const d = new Date(dueDate + "T23:59:59");
-  return (d.getTime() - now.getTime()) / DAY;
+  const d = new Date(dueDate + "T00:00:00");
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return (d.getTime() - today.getTime()) / DAY;
 }
 
 /** 紧急：有截止日期且 7 天内到期（含已超期） */

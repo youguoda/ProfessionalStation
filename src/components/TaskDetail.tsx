@@ -26,7 +26,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   useEffect(() => {
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
-  }, [task?.id]);
+  }, [task?.id, task?.title, task?.notes]);
 
   if (!task) return null;
 

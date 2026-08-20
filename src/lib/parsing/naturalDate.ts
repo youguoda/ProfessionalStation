@@ -146,25 +146,17 @@ export function parseNaturalDate(input: string, now: Date = new Date()): Natural
     }
   }
 
-  // 3) 下周/周几
+  // 3) 下周/下星期几（「下周三」= 下 + 周三）
   if (!date) {
-    const nextWeek = text.match(/^下(?:周|星期|礼拜)/);
-    if (nextWeek) {
-      text = text.replace(nextWeek[0], "").trim();
-      // 下周一~周日
-      const wd = text.match(/^(周一|周二|周三|周四|周五|周六|周日|星期[一二三四五六日天]|礼拜[一二三四五六日天])/);
-      if (wd) {
-        const target = WEEKDAYS[wd[1]];
-        if (target !== undefined) {
-          const nextMonday = addDays(today, 8 - today.getDay() === 8 ? 1 : 8 - today.getDay());
-          date = addDays(nextMonday, target);
-          text = text.replace(wd[0], "").trim();
-        }
-      } else {
-        // 仅「下周」→ 下周一
-        const nextMonday = addDays(today, today.getDay() === 1 ? 7 : ((8 - today.getDay()) % 7 || 7));
-        date = nextMonday;
-      }
+    const mNext = text.match(/^下(周[一二三四五六日]|星期[一二三四五六日天]|礼拜[一二三四五六日天]|周|星期|礼拜)/);
+    if (mNext) {
+      const token = mNext[1];
+      text = text.replace(mNext[0], "").trim();
+      const day = today.getDay();
+      const daysToNextMonday = day === 1 ? 7 : ((8 - day) % 7);
+      const nextMonday = addDays(today, daysToNextMonday);
+      const target = WEEKDAYS[token];
+      date = target !== undefined ? addDays(nextMonday, (target + 6) % 7) : nextMonday;
     }
   }
 

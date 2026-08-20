@@ -65,7 +65,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
 
     start: (focusTaskId = null) => {
       stop();
-      set({ status: "running", mode: "focus", secondsLeft: FOCUS_SECONDS, focusTaskId });
+      set({ status: "running", mode: "focus", secondsLeft: FOCUS_SECONDS, cycles: 0, focusTaskId });
       runInterval();
     },
     pause: () => {
@@ -79,7 +79,7 @@ export const usePomodoro = create<PomodoroState>((set, get) => {
     },
     reset: () => {
       stop();
-      set({ status: "idle", mode: "focus", secondsLeft: FOCUS_SECONDS, focusTaskId: null });
+      set({ status: "idle", mode: "focus", secondsLeft: FOCUS_SECONDS, cycles: 0, focusTaskId: null });
     },
     skip: () => {
       const { mode, cycles } = get();
