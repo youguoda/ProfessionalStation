@@ -165,3 +165,22 @@ export function selectReady(tasks: Task[]): Task[] {
     (t) => t.phase === "action" && t.status === "todo" && !isBlocked(t, tasks),
   );
 }
+
+/**
+ * 依赖成环检测：若把 depId 加入 taskId 的 blockedBy，是否形成环。
+ * 自依赖（taskId === depId）或 depId 沿 blockedBy 传递可达 taskId 均视为成环。
+ */
+export function wouldCreateCycle(taskId: string, depId: string, tasks: Task[]): boolean {
+  if (taskId === depId) return true;
+  const visited = new Set<string>();
+  const stack = [depId];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (cur === taskId) return true;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+    const t = tasks.find((x) => x.id === cur);
+    if (t) for (const next of t.blockedBy) stack.push(next);
+  }
+  return false;
+}

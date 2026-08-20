@@ -11,7 +11,7 @@ import {
 import type { Area, Db, Project, Tag, Task } from "@/lib/domain/types";
 import { nextDueDate } from "@/lib/domain/repeat";
 import { transition, type TaskEvent, type TransitionResult } from "@/lib/engine/stateMachine";
-import { isBlocked } from "@/lib/engine/selectors";
+import { isBlocked, wouldCreateCycle } from "@/lib/engine/selectors";
 
 /**
  * 文件持久化仓储（MVP：单用户、低并发）。
@@ -91,16 +91,40 @@ export async function createTask(input: NewTaskInput): Promise<Task> {
   });
 }
 
+export type UpdateTaskResult =
+  | { ok: true; task: Task }
+  | { ok: false; error: string; code: "NOT_FOUND" | "INVALID_DEPENDENCY" };
+
 export async function updateTask(
   id: string,
   patch: Partial<Omit<Task, "id" | "createdAt">>,
-): Promise<Task | null> {
+): Promise<UpdateTaskResult> {
   return mutate((db) => {
     const idx = db.tasks.findIndex((t) => t.id === id);
-    if (idx < 0) return null;
-    const next = { ...db.tasks[idx], ...patch, id: db.tasks[idx].id, createdAt: db.tasks[idx].createdAt, updatedAt: new Date().toISOString() };
+    if (idx < 0) return { ok: false, error: "任务不存在", code: "NOT_FOUND" };
+
+    // 依赖校验：禁止自依赖与循环依赖
+    if (patch.blockedBy) {
+      for (const depId of patch.blockedBy) {
+        if (wouldCreateCycle(id, depId, db.tasks)) {
+          return {
+            ok: false,
+            error: "不能添加该依赖：会造成自依赖或循环依赖",
+            code: "INVALID_DEPENDENCY",
+          };
+        }
+      }
+    }
+
+    const next = {
+      ...db.tasks[idx],
+      ...patch,
+      id: db.tasks[idx].id,
+      createdAt: db.tasks[idx].createdAt,
+      updatedAt: new Date().toISOString(),
+    };
     db.tasks[idx] = next;
-    return next;
+    return { ok: true, task: next };
   });
 }
 

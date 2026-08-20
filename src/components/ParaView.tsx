@@ -37,6 +37,7 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
   const projects = useStore((s) => s.projects);
   const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
+  const updateProject = useStore((s) => s.updateProject);
 
   const activeProjects = projects.filter((p) => !p.archived);
   const archivedProjects = projects.filter((p) => p.archived);
@@ -79,7 +80,15 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
                 <div key={p.id} className="rounded-xl border bg-background p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-sm font-medium"># {p.name}</span>
-                    <span className="text-xs text-muted-foreground">{list.length} 项进行中</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{list.length} 项进行中</span>
+                      <button
+                        onClick={() => updateProject(p.id, { archived: true }).catch(() => {})}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        归档
+                      </button>
+                    </div>
                   </div>
                   {list.length === 0 ? (
                     <p className="text-xs text-muted-foreground">没有待办</p>
@@ -149,9 +158,19 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
 
       <Section title="🗄 归档 Archives" hint={doneTasks.length ? `${doneTasks.length} 已完成` : ""}>
         {archivedProjects.length > 0 ? (
-          <p className="mb-2 text-xs text-muted-foreground">
-            已归档项目：{archivedProjects.map((p) => p.name).join("、")}
-          </p>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {archivedProjects.map((p) => (
+              <span key={p.id} className="flex items-center gap-1 rounded bg-muted px-2 py-1 text-xs">
+                # {p.name}
+                <button
+                  onClick={() => updateProject(p.id, { archived: false }).catch(() => {})}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  恢复
+                </button>
+              </span>
+            ))}
+          </div>
         ) : null}
         {doneTasks.length === 0 ? (
           <Empty text="暂无已完成任务" />

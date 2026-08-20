@@ -46,8 +46,10 @@ interface AppState {
   deleteTask: (id: string) => Promise<void>;
 
   createProject: (name: string) => Promise<Project>;
+  updateProject: (id: string, patch: Record<string, unknown>) => Promise<Project>;
   createArea: (name: string) => Promise<Area>;
   createTag: (name: string, kind: "tag" | "context") => Promise<Tag>;
+  updateSettings: (patch: Record<string, unknown>) => Promise<Db["settings"]>;
   saveReview: (notes: string, checklist: Record<string, boolean>) => Promise<void>;
 }
 
@@ -133,6 +135,12 @@ export const useStore = create<AppState>((set, get) => ({
     return project;
   },
 
+  updateProject: async (id, patch) => {
+    const project = await api.updateProject(id, patch);
+    set({ projects: get().projects.map((p) => (p.id === id ? project : p)) });
+    return project;
+  },
+
   createArea: async (name) => {
     const area = await api.createArea(name);
     set({ areas: [...get().areas, area] });
@@ -145,6 +153,12 @@ export const useStore = create<AppState>((set, get) => ({
       set({ tags: [...get().tags, tag] });
     }
     return tag;
+  },
+
+  updateSettings: async (patch) => {
+    const settings = await api.updateSettings(patch);
+    set({ settings });
+    return settings;
   },
 
   saveReview: async (notes, checklist) => {

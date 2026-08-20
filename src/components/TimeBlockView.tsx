@@ -16,6 +16,9 @@ import { useStore } from "@/store/useStore";
 import { isoDay } from "@/lib/engine/selectors";
 import type { Task } from "@/lib/domain/types";
 
+/** 展示的小时槽：8:00 – 21:00 */
+const HOURS = Array.from({ length: 14 }, (_, i) => 8 + i);
+
 function startOfWeek(offset: number, now = new Date()) {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
@@ -46,7 +49,7 @@ function Card({ task, onSelect }: { task: Task; onSelect: (id: string) => void }
       {...attributes}
       {...listeners}
       onClick={() => onSelect(task.id)}
-      className={`cursor-grab rounded-md border bg-background px-2 py-1.5 text-xs shadow-sm hover:shadow ${
+      className={`cursor-grab rounded-md border bg-background px-2 py-1 text-xs shadow-sm hover:shadow ${
         isDragging ? "opacity-40" : ""
       }`}
     >
@@ -54,6 +57,37 @@ function Card({ task, onSelect }: { task: Task; onSelect: (id: string) => void }
         <span className="mr-1 font-mono text-muted-foreground">{task.scheduledAt.slice(11, 16)}</span>
       ) : null}
       <span>{task.title}</span>
+    </div>
+  );
+}
+
+function HourSlot({
+  day,
+  hour,
+  tasks,
+  onSelect,
+}: {
+  day: string;
+  hour: number;
+  tasks: Task[];
+  onSelect: (id: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `slot-${day}-${hour}`, data: { day, hour } });
+  const pad = String(hour).padStart(2, "0");
+  const list = tasks.filter((t) => t.scheduledAt?.slice(0, 13) === `${day}T${pad}`);
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex min-h-[30px] items-start gap-1 rounded px-1 py-0.5 ${
+        isOver ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted/60"
+      }`}
+    >
+      <span className="w-9 shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">{pad}:00</span>
+      <div className="flex-1 space-y-0.5">
+        {list.map((t) => (
+          <Card key={t.id} task={t} onSelect={onSelect} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -70,17 +104,17 @@ function DayColumn({
   isToday: boolean;
 }) {
   const key = isoDay(date);
-  const { setNodeRef, isOver } = useDroppable({ id: `day-${key}`, data: { day: key } });
-  const list = tasks
-    .filter((t) => t.scheduledAt?.slice(0, 10) === key)
-    .sort((a, b) => (a.scheduledAt ?? "").localeCompare(b.scheduledAt ?? ""));
+  const dayTasks = tasks.filter((t) => t.scheduledAt?.slice(0, 10) === key);
+  const overflow = dayTasks.filter((t) => {
+    const h = Number(t.scheduledAt?.slice(11, 13));
+    return h < HOURS[0] || h > HOURS[HOURS.length - 1];
+  });
 
   return (
     <div
-      ref={setNodeRef}
-      className={`flex min-h-[50vh] flex-col rounded-xl border bg-muted/30 p-2 ${
-        isOver ? "border-primary" : ""
-      } ${isToday ? "ring-1 ring-primary/40" : ""}`}
+      className={`flex flex-col rounded-xl border bg-muted/30 p-2 ${
+        isToday ? "ring-1 ring-primary/40" : ""
+      }`}
     >
       <div className="mb-2 px-1 text-center">
         <div className={`text-xs font-semibold ${isToday ? "text-primary" : ""}`}>
@@ -90,13 +124,19 @@ function DayColumn({
           {date.getMonth() + 1}/{date.getDate()}
         </div>
       </div>
-      <div className="space-y-1.5">
-        {list.map((t) => (
-          <Card key={t.id} task={t} onSelect={onSelect} />
+
+      {overflow.length > 0 ? (
+        <div className="mb-2 space-y-0.5 rounded border border-dashed px-1 py-1">
+          {overflow.map((t) => (
+            <Card key={t.id} task={t} onSelect={onSelect} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="space-y-px">
+        {HOURS.map((h) => (
+          <HourSlot key={h} day={key} hour={h} tasks={dayTasks} onSelect={onSelect} />
         ))}
-        {list.length === 0 ? (
-          <p className="py-6 text-center text-[11px] text-muted-foreground">—</p>
-        ) : null}
       </div>
     </div>
   );
@@ -125,9 +165,11 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
     if (!over) return;
     const taskId = String(active.id);
     const targetDay = over.data.current?.day as string | undefined;
+    const targetHour = over.data.current?.hour as number | undefined;
     const unschedule = over.data.current?.unschedule as boolean | undefined;
-    if (targetDay) {
-      updateTask(taskId, { scheduledAt: `${targetDay}T09:00:00` }).catch(() => {});
+    if (targetDay && targetHour !== undefined) {
+      const pad = String(targetHour).padStart(2, "0");
+      updateTask(taskId, { scheduledAt: `${targetDay}T${pad}:00:00` }).catch(() => {});
     } else if (unschedule) {
       updateTask(taskId, { scheduledAt: null }).catch(() => {});
     }
@@ -148,7 +190,7 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
         <div className="grid grid-cols-[15rem_1fr] gap-4">
           <div
             ref={setUnschedRef}
-            className={`rounded-xl border bg-muted/30 p-3 ${unschedOver ? "border-primary" : ""}`}
+            className={`h-fit rounded-xl border bg-muted/30 p-3 ${unschedOver ? "border-primary" : ""}`}
           >
             <div className="mb-2 text-xs font-semibold text-muted-foreground">待排期</div>
             <div className="space-y-1.5">
@@ -179,7 +221,7 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
       </DndContext>
 
       <p className="mt-4 text-xs text-muted-foreground">
-        把「待排期」任务拖到某一天即可排期；把已排期任务拖回「待排期」取消排期。
+        把「待排期」任务拖到某一天的某个小时即可精确排期；拖回「待排期」取消排期；点击任务可修改排期时间。
       </p>
     </div>
   );

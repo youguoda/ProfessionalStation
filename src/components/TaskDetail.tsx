@@ -6,6 +6,7 @@ import { EFFORT_OPTIONS, PHASE_LABELS, STATUS_LABELS } from "@/lib/domain/consta
 import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
 import { isBlocked } from "@/lib/engine/selectors";
 import type { Priority } from "@/lib/domain/types";
+import { usePomodoro } from "@/store/usePomodoro";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -18,10 +19,16 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const tags = useStore((s) => s.tags);
   const createTag = useStore((s) => s.createTag);
 
+  const pomodoroStatus = usePomodoro((s) => s.status);
+  const focusTaskId = usePomodoro((s) => s.focusTaskId);
+  const pomodoroStart = usePomodoro((s) => s.start);
+  const pomodoroPause = usePomodoro((s) => s.pause);
+
   const [title, setTitle] = useState(task?.title ?? "");
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [tagInput, setTagInput] = useState("");
   const [ctxInput, setCtxInput] = useState("");
+  const [depError, setDepError] = useState("");
 
   useEffect(() => {
     setTitle(task?.title ?? "");
@@ -32,6 +39,15 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
 
   const save = (patch: Record<string, unknown>) => {
     updateTask(task.id, patch).catch(() => {});
+  };
+
+  const addDependency = async (depId: string) => {
+    try {
+      await updateTask(task.id, { blockedBy: [...task.blockedBy, depId] });
+      setDepError("");
+    } catch (e) {
+      setDepError(e instanceof Error ? e.message : "添加依赖失败");
+    }
   };
 
   const addTag = async (kind: "tag" | "context", value: string) => {
@@ -79,6 +95,21 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           >
             {task.status === "doing" ? "完成" : "开始"}
           </button>
+          {task.phase !== "trash" && task.status !== "done" && task.status !== "canceled" ? (
+            <button
+              onClick={() => {
+                if (focusTaskId === task.id && pomodoroStatus === "running") {
+                  pomodoroPause();
+                } else {
+                  pomodoroStart(task.id);
+                }
+              }}
+              className="rounded-md border px-3 py-1.5 text-xs"
+              title="开启一个 25 分钟专注番茄钟"
+            >
+              {focusTaskId === task.id && pomodoroStatus === "running" ? "🍅 专注中…" : "🍅 专注"}
+            </button>
+          ) : null}
           {task.phase === "inbox" ? (
             <select
               onChange={(e) =>
@@ -157,6 +188,18 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
               type="date"
               value={task.dueDate ?? ""}
               onChange={(e) => save({ dueDate: e.target.value || null })}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          </label>
+
+          <label className="col-span-2 text-xs text-muted-foreground">
+            排期时间（时间块）
+            <input
+              type="datetime-local"
+              value={task.scheduledAt ? task.scheduledAt.slice(0, 16) : ""}
+              onChange={(e) =>
+                save({ scheduledAt: e.target.value ? `${e.target.value}:00` : null })
+              }
               className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-sm"
             />
           </label>
@@ -283,9 +326,12 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             })}
             {task.blockedBy.length === 0 ? <span className="text-xs text-muted-foreground">无</span> : null}
           </div>
+          {depError ? (
+            <p className="mb-1 text-xs text-red-500">{depError}</p>
+          ) : null}
           <select
             onChange={(e) => {
-              if (e.target.value) save({ blockedBy: [...task.blockedBy, e.target.value] });
+              if (e.target.value) addDependency(e.target.value);
             }}
             defaultValue=""
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"

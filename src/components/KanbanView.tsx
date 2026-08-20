@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -103,6 +104,8 @@ export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const settings = useStore((s) => s.settings);
   const transition = useStore((s) => s.transition);
+  const updateSettings = useStore((s) => s.updateSettings);
+  const [showWip, setShowWip] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const columns = selectKanban(tasks, settings).filter((c) =>
@@ -124,7 +127,38 @@ export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
 
   return (
     <div>
-      <h1 className="mb-5 text-xl font-semibold tracking-tight">看板</h1>
+      <div className="mb-5 flex items-center justify-between">
+        <h1 className="text-xl font-semibold tracking-tight">看板</h1>
+        <button
+          onClick={() => setShowWip((v) => !v)}
+          className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          ⚙ WIP 上限
+        </button>
+      </div>
+
+      {showWip ? (
+        <div className="mb-4 flex flex-wrap items-center gap-4 rounded-lg border bg-muted/40 p-3 text-xs">
+          <span className="text-muted-foreground">每列在制品上限（留空 = 不限）</span>
+          {COLUMNS.map((s) => (
+            <label key={s} className="flex items-center gap-1">
+              {STATUS_LABELS[s]}
+              <input
+                type="number"
+                min={0}
+                max={50}
+                value={settings.kanbanWip[s] === -1 ? "" : settings.kanbanWip[s]}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? -1 : Math.max(0, Number(e.target.value));
+                  updateSettings({ kanbanWip: { ...settings.kanbanWip, [s]: v } }).catch(() => {});
+                }}
+                className="w-14 rounded-md border bg-background px-1 py-1 text-sm"
+              />
+            </label>
+          ))}
+        </div>
+      ) : null}
+
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-3 gap-4">
           {columns.map((c) => (

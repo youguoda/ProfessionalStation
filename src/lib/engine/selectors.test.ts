@@ -19,6 +19,7 @@ import {
   selectToday,
   selectTrash,
   selectWaiting,
+  wouldCreateCycle,
 } from "./selectors";
 
 const now = new Date(2025, 0, 8); // 2025-01-08（周三）
@@ -206,5 +207,38 @@ describe("isBlocked / selectReady", () => {
     const blocked = createTask({ title: "blocked", phase: "action", blockedBy: [dep.id] });
     const ready = createTask({ title: "ready", phase: "action" });
     expect(selectReady([dep, blocked, ready]).map((t) => t.title)).toEqual(["dep", "ready"]);
+  });
+});
+
+describe("wouldCreateCycle 成环检测", () => {
+  it("自依赖成环", () => {
+    const a = createTask({ title: "a", phase: "action" });
+    expect(wouldCreateCycle(a.id, a.id, [a])).toBe(true);
+  });
+
+  it("直接互依成环（A 依赖 B，而 B 已依赖 A）", () => {
+    const a = createTask({ title: "a", phase: "action" });
+    const b = createTask({ title: "b", phase: "action", blockedBy: [a.id] });
+    expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(true);
+  });
+
+  it("间接成环（A→B→C→A）", () => {
+    const a = createTask({ title: "a", phase: "action" });
+    const b = createTask({ title: "b", phase: "action", blockedBy: [a.id] });
+    const c = createTask({ title: "c", phase: "action", blockedBy: [b.id] });
+    expect(wouldCreateCycle(a.id, c.id, [a, b, c])).toBe(true);
+  });
+
+  it("合法依赖不成环", () => {
+    const a = createTask({ title: "a", phase: "action" });
+    const b = createTask({ title: "b", phase: "action" });
+    expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(false);
+  });
+
+  it("依赖链与目标无关时不成环", () => {
+    const a = createTask({ title: "a", phase: "action" });
+    const x = createTask({ title: "x", phase: "action" });
+    const b = createTask({ title: "b", phase: "action", blockedBy: [x.id] });
+    expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(false);
   });
 });

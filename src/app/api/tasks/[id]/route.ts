@@ -42,9 +42,12 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const task = await updateTask(id, parsed.data);
-  if (!task) return NextResponse.json({ error: "任务不存在" }, { status: 404 });
-  return NextResponse.json(task);
+  const result = await updateTask(id, parsed.data);
+  if (!result.ok) {
+    const status = result.code === "NOT_FOUND" ? 404 : 400;
+    return NextResponse.json({ error: result.error }, { status });
+  }
+  return NextResponse.json(result.task);
 }
 
 export async function DELETE(

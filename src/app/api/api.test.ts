@@ -5,8 +5,10 @@ import { POST as postTask } from "./tasks/route";
 import { PATCH as patchTask, DELETE as deleteTask } from "./tasks/[id]/route";
 import { POST as postTransition } from "./tasks/[id]/transition/route";
 import { POST as postProject } from "./projects/route";
+import { PATCH as patchProject } from "./projects/[id]/route";
 import { POST as postArea } from "./areas/route";
 import { POST as postTag } from "./tags/route";
+import { PATCH as patchSettings } from "./settings/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
@@ -140,5 +142,44 @@ describe("API：项目/领域/标签/bootstrap", () => {
     expect(Array.isArray(db.tags)).toBe(true);
     expect(Array.isArray(db.weeklyReviews)).toBe(true);
     expect(db.settings).toBeDefined();
+  });
+});
+
+describe("API：依赖成环防护", () => {
+  it("PATCH 自依赖返回 400 与精确错误", async () => {
+    const a = await create({ title: "a", phase: "action" });
+    const res = await patchTask(
+      jsonReq(`/api/tasks/${a.id}`, { blockedBy: [a.id] }, "PATCH"),
+      { params: Promise.resolve({ id: a.id as string }) },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("不能添加该依赖：会造成自依赖或循环依赖");
+  });
+});
+
+describe("API：设置与项目归档", () => {
+  it("PATCH settings 更新看板 WIP", async () => {
+    const res = await patchSettings(
+      jsonReq("/api/settings", { kanbanWip: { todo: 2, doing: 1, done: -1, canceled: -1 } }, "PATCH"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.kanbanWip.todo).toBe(2);
+    expect(body.kanbanWip.done).toBe(-1);
+  });
+
+  it("PATCH 项目归档与恢复", async () => {
+    const p = await (await postProject(jsonReq("/api/projects", { name: "P" }))).json();
+    const r1 = await patchProject(
+      jsonReq(`/api/projects/${p.id}`, { archived: true }, "PATCH"),
+      { params: Promise.resolve({ id: p.id }) },
+    );
+    expect(r1.status).toBe(200);
+    expect((await r1.json()).archived).toBe(true);
+    const r2 = await patchProject(
+      jsonReq(`/api/projects/${p.id}`, { archived: false }, "PATCH"),
+      { params: Promise.resolve({ id: p.id }) },
+    );
+    expect((await r2.json()).archived).toBe(false);
   });
 });

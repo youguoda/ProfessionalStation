@@ -17,16 +17,48 @@ describe("Task 持久化", () => {
 
   it("updateTask 合并且保留 id/createdAt", async () => {
     const t = await store.createTask({ title: "原" });
-    const updated = await store.updateTask(t.id, { title: "新", priority: 1 });
-    expect(updated).not.toBeNull();
-    expect(updated!.title).toBe("新");
-    expect(updated!.priority).toBe(1);
-    expect(updated!.id).toBe(t.id);
-    expect(updated!.createdAt).toBe(t.createdAt);
+    const r = await store.updateTask(t.id, { title: "新", priority: 1 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.title).toBe("新");
+      expect(r.task.priority).toBe(1);
+      expect(r.task.id).toBe(t.id);
+      expect(r.task.createdAt).toBe(t.createdAt);
+    }
   });
 
-  it("updateTask 未知 id 返回 null", async () => {
-    expect(await store.updateTask("missing", { title: "x" })).toBeNull();
+  it("updateTask 未知 id 返回 NOT_FOUND", async () => {
+    const r = await store.updateTask("missing", { title: "x" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("依赖成环防护", () => {
+  it("自依赖被拒绝", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const r = await store.updateTask(a.id, { blockedBy: [a.id] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("INVALID_DEPENDENCY");
+      expect(r.error).toBe("不能添加该依赖：会造成自依赖或循环依赖");
+    }
+  });
+
+  it("互依成环被拒绝（A→B→A）", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const b = await store.createTask({ title: "b", phase: "action", blockedBy: [a.id] });
+    const r = await store.updateTask(a.id, { blockedBy: [b.id] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("INVALID_DEPENDENCY");
+  });
+
+  it("合法依赖可添加", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const b = await store.createTask({ title: "b", phase: "action" });
+    const r = await store.updateTask(b.id, { blockedBy: [a.id] });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.blockedBy).toEqual([a.id]);
   });
 });
 

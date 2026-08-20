@@ -31,6 +31,12 @@ export const api = {
   createProject: (name: string) =>
     request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),
 
+  updateProject: (id: string, patch: Record<string, unknown>) =>
+    request<Project>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  updateSettings: (patch: Record<string, unknown>) =>
+    request<Db["settings"]>("/api/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+
   createArea: (name: string) =>
     request<Area>("/api/areas", { method: "POST", body: JSON.stringify({ name }) }),
 
