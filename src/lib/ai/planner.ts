@@ -27,6 +27,15 @@ export function getAiConfig(): AiConfig {
 
 /** 调用 OpenAI 兼容 chat/completions，返回消息内容 */
 export async function chatJson(prompt: string, system?: string): Promise<string> {
+  return chatWithMessages([{ role: "user", content: prompt }], system, 0.2);
+}
+
+/** 多轮消息调用（system + 历史消息），返回消息内容 */
+export async function chatWithMessages(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  system?: string,
+  temperature = 0.7,
+): Promise<string> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
   const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
@@ -42,9 +51,9 @@ export async function chatJson(prompt: string, system?: string): Promise<string>
           role: "system",
           content: system ?? "你是一个任务管理助手。只输出合法 JSON，不要输出任何多余文字或代码块。",
         },
-        { role: "user", content: prompt },
+        ...messages,
       ],
-      temperature: 0.2,
+      temperature,
       response_format: { type: "json_object" },
     }),
   });

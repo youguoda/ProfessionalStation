@@ -133,6 +133,55 @@ export interface Settings {
   automations: AutomationSettings;
 }
 
+/** 马力可建议的操作类型（HITL：仅建议，经用户确认后执行） */
+export type AgentToolName =
+  | "create_task"
+  | "complete_task"
+  | "reschedule_task"
+  | "set_priority"
+  | "mark_frog"
+  | "add_note";
+
+/** 马力的人格配置 */
+export interface AgentProfile {
+  name: string;
+  /** 预设模板 id（comrade/mentor/stern/empathic） */
+  personaId: string;
+  /** 四段自定义指令（与模板合并，可覆盖/追加） */
+  custom: {
+    role: string[];
+    tone: string[];
+    style: string[];
+    boundaries: string[];
+  };
+  updatedAt: string;
+}
+
+/** 操作建议卡片 */
+export interface ActionProposal {
+  id: string;
+  tool: AgentToolName;
+  args: Record<string, unknown>;
+  summary: string;
+  status: "pending" | "approved" | "denied";
+}
+
+/** 对话消息 */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  proposals: ActionProposal[];
+  createdAt: string;
+}
+
+/** 马力写下的长期记忆笔记 */
+export interface MemoryNote {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface Db {
   tasks: Task[];
   projects: Project[];
@@ -142,4 +191,7 @@ export interface Db {
   habitChecks: HabitCheck[];
   weeklyReviews: WeeklyReview[];
   settings: Settings;
+  agentProfile: AgentProfile;
+  chatMessages: ChatMessage[];
+  memoryNotes: MemoryNote[];
 }

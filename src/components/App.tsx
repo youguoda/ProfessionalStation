@@ -14,12 +14,15 @@ import { HabitsView } from "./HabitsView";
 import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
 import { TaskDetail } from "./TaskDetail";
+import { AgentPanel } from "./AgentPanel";
 
 export function App() {
   const load = useStore((s) => s.load);
   const view = useStore((s) => s.view);
   const loaded = useStore((s) => s.loaded);
   const error = useStore((s) => s.error);
+  const agentOpen = useStore((s) => s.agentOpen);
+  const setAgentOpen = useStore((s) => s.setAgentOpen);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -89,6 +92,7 @@ export function App() {
       {selectedId ? (
         <TaskDetail id={selectedId} onClose={() => setSelectedId(null)} />
       ) : null}
+      {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
       <PomodoroDock />
     </div>
   );

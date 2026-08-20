@@ -6,10 +6,22 @@ import {
   createProject as makeProject,
   createTag as makeTag,
   createTask as makeTask,
+  defaultAgentProfile,
   emptyDb,
   type NewTaskInput,
 } from "@/lib/domain/factory";
-import type { Area, Db, Habit, HabitCheck, Project, Tag, Task } from "@/lib/domain/types";
+import type {
+  AgentProfile,
+  Area,
+  ChatMessage,
+  Db,
+  Habit,
+  HabitCheck,
+  MemoryNote,
+  Project,
+  Tag,
+  Task,
+} from "@/lib/domain/types";
 import { nextDueDate } from "@/lib/domain/repeat";
 import { transition, type TaskEvent, type TransitionResult } from "@/lib/engine/stateMachine";
 import { isBlocked, wouldCreateCycle } from "@/lib/engine/selectors";
@@ -38,7 +50,7 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** 旧数据迁移归一化：补齐新增字段（habits/habitChecks/settings.automations） */
+/** 旧数据迁移归一化：补齐新增字段（habits/habitChecks/settings.automations/agentProfile/chatMessages/memoryNotes） */
 function normalizeDb(raw: Partial<Db>): Db {
   const defaults = emptyDb();
   const db = (raw ?? {}) as Partial<Db>;
@@ -53,6 +65,16 @@ function normalizeDb(raw: Partial<Db>): Db {
     habits: Array.isArray(db.habits) ? db.habits : [],
     habitChecks: Array.isArray(db.habitChecks) ? db.habitChecks : [],
     weeklyReviews: Array.isArray(db.weeklyReviews) ? db.weeklyReviews : [],
+    agentProfile: {
+      ...defaultAgentProfile(),
+      ...(db.agentProfile ?? {}),
+      custom: {
+        ...defaultAgentProfile().custom,
+        ...((db.agentProfile as AgentProfile | undefined)?.custom ?? {}),
+      },
+    },
+    chatMessages: Array.isArray(db.chatMessages) ? db.chatMessages : [],
+    memoryNotes: Array.isArray(db.memoryNotes) ? db.memoryNotes : [],
     settings: {
       ...defaults.settings,
       ...s,
@@ -397,6 +419,102 @@ export async function runAutomations(): Promise<{
       }
     }
     return { applied, notifications: result.notifications, tasks: db.tasks };
+  });
+}
+
+// ---- Agent（马力） ----
+
+export async function getAgentProfile(): Promise<AgentProfile> {
+  const db = await readDb();
+  return db.agentProfile;
+}
+
+export async function updateAgentProfile(
+  patch: Partial<Omit<AgentProfile, "custom">> & {
+    custom?: Partial<AgentProfile["custom"]>;
+  },
+): Promise<AgentProfile> {
+  return mutate((db) => {
+    db.agentProfile = {
+      ...db.agentProfile,
+      ...patch,
+      custom: {
+        role: patch.custom?.role ?? db.agentProfile.custom.role,
+        tone: patch.custom?.tone ?? db.agentProfile.custom.tone,
+        style: patch.custom?.style ?? db.agentProfile.custom.style,
+        boundaries: patch.custom?.boundaries ?? db.agentProfile.custom.boundaries,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    return db.agentProfile;
+  });
+}
+
+export async function listChatMessages(): Promise<ChatMessage[]> {
+  const db = await readDb();
+  return db.chatMessages;
+}
+
+export async function appendChatMessages(
+  messages: Array<{
+    role: ChatMessage["role"];
+    content: string;
+    proposals?: ChatMessage["proposals"];
+  }>,
+): Promise<ChatMessage[]> {
+  return mutate((db) => {
+    for (const m of messages) {
+      db.chatMessages.push({
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: m.content,
+        proposals: m.proposals ?? [],
+        createdAt: new Date().toISOString(),
+      });
+    }
+    if (db.chatMessages.length > 200) {
+      db.chatMessages = db.chatMessages.slice(-200);
+    }
+    return db.chatMessages;
+  });
+}
+
+export async function clearChat(): Promise<void> {
+  return mutate((db) => {
+    db.chatMessages = [];
+  });
+}
+
+export async function setProposalStatus(
+  messageId: string,
+  proposalId: string,
+  status: "approved" | "denied",
+): Promise<ChatMessage | null> {
+  return mutate((db) => {
+    const msg = db.chatMessages.find((m) => m.id === messageId);
+    if (!msg) return null;
+    const p = msg.proposals.find((x) => x.id === proposalId);
+    if (!p) return null;
+    if (p.status === "pending") p.status = status; // 幂等
+    return msg;
+  });
+}
+
+export async function listMemoryNotes(): Promise<MemoryNote[]> {
+  const db = await readDb();
+  return db.memoryNotes;
+}
+
+export async function addMemoryNote(content: string): Promise<MemoryNote> {
+  return mutate((db) => {
+    const note = {
+      id: crypto.randomUUID(),
+      content: content.trim().slice(0, 500),
+      createdAt: new Date().toISOString(),
+    };
+    db.memoryNotes.push(note);
+    if (db.memoryNotes.length > 100) db.memoryNotes = db.memoryNotes.slice(-100);
+    return note;
   });
 }
 

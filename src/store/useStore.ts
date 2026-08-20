@@ -2,7 +2,17 @@
 
 import { create } from "zustand";
 import { api } from "@/lib/client/api";
-import type { Area, Db, Habit, HabitCheck, Project, Tag, Task } from "@/lib/domain/types";
+import type {
+  AgentProfile,
+  Area,
+  ChatMessage,
+  Db,
+  Habit,
+  HabitCheck,
+  Project,
+  Tag,
+  Task,
+} from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 
 export type ViewId =
@@ -34,6 +44,9 @@ interface AppState {
   settings: Db["settings"];
   automationLog: { time: string; message: string }[];
   aiStatus: { enabled: boolean; model: string } | null;
+  agentOpen: boolean;
+  agentProfile: AgentProfile | null;
+  chatMessages: ChatMessage[];
 
   view: ViewId;
   search: string;
@@ -62,6 +75,16 @@ interface AppState {
   deleteHabit: (id: string) => Promise<void>;
   toggleHabitCheck: (habitId: string, date: string) => Promise<void>;
   runAutomations: () => Promise<{ applied: number; notifications: string[] }>;
+
+  setAgentOpen: (open: boolean) => void;
+  saveAgentProfile: (patch: Record<string, unknown>) => Promise<AgentProfile>;
+  sendChat: (text: string) => Promise<void>;
+  clearChat: () => Promise<void>;
+  resolveProposal: (
+    messageId: string,
+    proposalId: string,
+    status: "approved" | "denied",
+  ) => Promise<void>;
 }
 
 function upsert(list: Task[], task: Task): Task[] {
@@ -90,6 +113,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
   automationLog: [],
   aiStatus: null,
+  agentOpen: false,
+  agentProfile: null,
+  chatMessages: [],
 
   view: "inbox",
   search: "",
@@ -99,9 +125,11 @@ export const useStore = create<AppState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
-      const [db, aiStatus] = await Promise.all([
+      const [db, aiStatus, agentProfile, chatMessages] = await Promise.all([
         api.bootstrap(),
         api.aiStatus().catch(() => null),
+        api.agentProfile().catch(() => null),
+        api.chatMessages().catch(() => []),
       ]);
       set({
         tasks: db.tasks,
@@ -113,6 +141,8 @@ export const useStore = create<AppState>((set, get) => ({
         weeklyReviews: db.weeklyReviews,
         settings: db.settings,
         aiStatus,
+        agentProfile,
+        chatMessages,
         loaded: true,
         loading: false,
       });
@@ -228,5 +258,28 @@ export const useStore = create<AppState>((set, get) => ({
       set({ automationLog: [...entries, ...get().automationLog].slice(0, 50) });
     }
     return { applied: result.applied, notifications: result.notifications };
+  },
+
+  setAgentOpen: (open) => set({ agentOpen: open }),
+
+  saveAgentProfile: async (patch) => {
+    const profile = await api.saveAgentProfile(patch);
+    set({ agentProfile: profile });
+    return profile;
+  },
+
+  sendChat: async (text) => {
+    const { messages } = await api.sendChat(text);
+    set({ chatMessages: messages });
+  },
+
+  clearChat: async () => {
+    await api.clearChat();
+    set({ chatMessages: [] });
+  },
+
+  resolveProposal: async (messageId, proposalId, status) => {
+    const msg = await api.setProposalStatus(messageId, proposalId, status);
+    set({ chatMessages: get().chatMessages.map((m) => (m.id === msg.id ? msg : m)) });
   },
 }));

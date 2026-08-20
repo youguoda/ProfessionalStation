@@ -16,6 +16,9 @@ import { POST as runAutomationsRoute } from "./automations/run/route";
 import { GET as getAiStatus } from "./ai/status/route";
 import { POST as postAiBreakdown } from "./ai/breakdown/route";
 import { POST as postAiSchedule } from "./ai/schedule/route";
+import { GET as getAgentProfile, PATCH as patchAgentProfile } from "./agent/profile/route";
+import { GET as getAgentChat, POST as postAgentChat, DELETE as clearAgentChat } from "./agent/chat/route";
+import { POST as postAgentProposalStatus } from "./agent/proposals/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
@@ -366,5 +369,147 @@ describe("API：AI", () => {
     expect(body.source).toBe("ai");
     expect(body.suggestions).toHaveLength(1);
     expect(body.suggestions[0].taskId).toBe(t.id);
+  });
+});
+
+describe("API：马力 Agent", () => {
+  it("GET profile 返回默认人格", async () => {
+    const res = await getAgentProfile();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe("马力");
+    expect(body.personaId).toBe("comrade");
+    expect(Array.isArray(body.custom.role)).toBe(true);
+  });
+
+  it("PATCH profile 保存人格，非法 personaId 400", async () => {
+    const ok = await patchAgentProfile(
+      jsonReq("/api/agent/profile", { name: "小马", personaId: "stern", custom: { role: ["你是老马"] } }, "PATCH"),
+    );
+    expect(ok.status).toBe(200);
+    const saved = await ok.json();
+    expect(saved.name).toBe("小马");
+    expect(saved.personaId).toBe("stern");
+    expect(saved.custom.role).toEqual(["你是老马"]);
+
+    const bad = await patchAgentProfile(
+      jsonReq("/api/agent/profile", { personaId: "unknown" }, "PATCH"),
+    );
+    expect(bad.status).toBe(400);
+  });
+
+  it("chat 未配置 key → 503；空消息 → 400", async () => {
+    delete process.env.AI_API_KEY;
+    expect(
+      (await postAgentChat(jsonReq("/api/agent/chat", { text: "你好" }))).status,
+    ).toBe(503);
+    expect((await postAgentChat(jsonReq("/api/agent/chat", { text: "" }))).status).toBe(400);
+  });
+
+  it("chat 配置 key + mock fetch → 追加消息与待确认建议", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    reply: "今天先做写周报吧。",
+                    proposals: [
+                      { tool: "create_task", args: { title: "写周报" }, summary: "新建写周报任务" },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "今天先做什么？" }));
+    expect(res.status).toBe(200);
+    const { messages } = await res.json();
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe("user");
+    expect(messages[1].role).toBe("assistant");
+    expect(messages[1].content).toBe("今天先做写周报吧。");
+    expect(messages[1].proposals).toHaveLength(1);
+    expect(messages[1].proposals[0].status).toBe("pending");
+    expect(messages[1].proposals[0].tool).toBe("create_task");
+  });
+
+  it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    reply: "建议完成这个任务。",
+                    proposals: [
+                      { tool: "mark_frog", args: { taskId: "t1", isFrog: true }, summary: "标记青蛙" },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const { messages } = await (await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }))).json();
+    const msg = messages[1];
+    const pid = msg.proposals[0].id;
+
+    const r1 = await postAgentProposalStatus(
+      jsonReq("/api/agent/proposals", { messageId: msg.id, proposalId: pid, status: "approved" }),
+    );
+    expect(r1.status).toBe(200);
+    expect((await r1.json()).proposals[0].status).toBe("approved");
+
+    // 幂等：再次 approve 不报错
+    const r2 = await postAgentProposalStatus(
+      jsonReq("/api/agent/proposals", { messageId: msg.id, proposalId: pid, status: "denied" }),
+    );
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).proposals[0].status).toBe("approved");
+
+    const missing = await postAgentProposalStatus(
+      jsonReq("/api/agent/proposals", { messageId: "m", proposalId: "p", status: "approved" }),
+    );
+    expect(missing.status).toBe(404);
+
+    const invalid = await postAgentProposalStatus(
+      jsonReq("/api/agent/proposals", { messageId: msg.id, proposalId: pid, status: "weird" }),
+    );
+    expect(invalid.status).toBe(400);
+  });
+
+  it("DELETE chat 清空对话", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ reply: "好", proposals: [] }) } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
+    expect((await (await getAgentChat()).json()).length).toBe(2);
+    expect((await clearAgentChat()).status).toBe(200);
+    expect((await (await getAgentChat()).json()).length).toBe(0);
   });
 });

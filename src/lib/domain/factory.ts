@@ -1,5 +1,4 @@
-import type { Area, Db, Habit, Project, Settings, Task, Tag } from "./types";
-
+import type { AgentProfile, Area, Db, Habit, Project, Settings, Task, Tag } from "./types";
 export function uid(): string {
   // 浏览器与 Node 18+ 均可用
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -111,6 +110,16 @@ export function createHabit(name: string, icon: string = "🎯"): Habit {
   };
 }
 
+/** 马力默认人格（战友模板） */
+export function defaultAgentProfile(): AgentProfile {
+  return {
+    name: "马力",
+    personaId: "comrade",
+    custom: { role: [], tone: [], style: [], boundaries: [] },
+    updatedAt: nowIso(),
+  };
+}
+
 export function emptyDb(): Db {
   return {
     tasks: [],
@@ -129,5 +138,8 @@ export function emptyDb(): Db {
         staleWaitingReminder: false,
       },
     },
+    agentProfile: defaultAgentProfile(),
+    chatMessages: [],
+    memoryNotes: [],
   };
 }

@@ -1,4 +1,13 @@
-import type { Area, Db, Habit, Project, Tag, Task } from "@/lib/domain/types";
+import type {
+  AgentProfile,
+  Area,
+  ChatMessage,
+  Db,
+  Habit,
+  Project,
+  Tag,
+  Task,
+} from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 import type { SlotSuggestion } from "@/lib/engine/scheduler";
 
@@ -79,5 +88,26 @@ export const api = {
   aiSchedule: () =>
     request<{ suggestions: SlotSuggestion[]; source: "ai" | "heuristic" }>("/api/ai/schedule", {
       method: "POST",
+    }),
+
+  agentProfile: () => request<AgentProfile>("/api/agent/profile"),
+
+  saveAgentProfile: (patch: Record<string, unknown>) =>
+    request<AgentProfile>("/api/agent/profile", { method: "PATCH", body: JSON.stringify(patch) }),
+
+  chatMessages: () => request<ChatMessage[]>("/api/agent/chat"),
+
+  sendChat: (text: string) =>
+    request<{ messages: ChatMessage[] }>("/api/agent/chat", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+
+  clearChat: () => request<{ ok: boolean }>("/api/agent/chat", { method: "DELETE" }),
+
+  setProposalStatus: (messageId: string, proposalId: string, status: "approved" | "denied") =>
+    request<ChatMessage>("/api/agent/proposals", {
+      method: "POST",
+      body: JSON.stringify({ messageId, proposalId, status }),
     }),
 };

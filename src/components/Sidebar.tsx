@@ -41,6 +41,8 @@ export function Sidebar() {
   const createArea = useStore((s) => s.createArea);
   const habits = useStore((s) => s.habits);
   const aiStatus = useStore((s) => s.aiStatus);
+  const agentOpen = useStore((s) => s.agentOpen);
+  const setAgentOpen = useStore((s) => s.setAgentOpen);
 
   const counts: Record<ViewId, number> = {
     inbox: selectInbox(tasks).length,
@@ -66,6 +68,18 @@ export function Sidebar() {
       <div className="px-4 pb-2 text-[11px] text-muted-foreground">
         {aiStatus?.enabled ? `🤖 AI 已启用 · ${aiStatus.model}` : "🤖 AI 未配置"}
       </div>
+
+      <button
+        onClick={() => setAgentOpen(!agentOpen)}
+        className={`mx-3 mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+          agentOpen
+            ? "border-primary bg-primary/15 text-primary"
+            : "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+        }`}
+      >
+        🤖 马力
+        <span className="ml-auto text-[11px] text-muted-foreground">计划助手</span>
+      </button>
 
       <nav className="px-2 space-y-0.5">
         {VIEWS.map((v) => (
