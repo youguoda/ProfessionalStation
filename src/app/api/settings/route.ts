@@ -11,6 +11,14 @@ export async function PATCH(req: Request) {
   const patch: Record<string, unknown> = {};
   if (typeof body.defaultMode === "string") patch.defaultMode = body.defaultMode;
   if (body.kanbanWip && typeof body.kanbanWip === "object") patch.kanbanWip = body.kanbanWip;
+  if (body.automations && typeof body.automations === "object") {
+    const a = body.automations as Record<string, unknown>;
+    const automations: Record<string, boolean> = {};
+    for (const key of ["autoFlagOverdueFrog", "autoClearFrogOnDone", "staleWaitingReminder"]) {
+      if (typeof a[key] === "boolean") automations[key] = a[key] as boolean;
+    }
+    patch.automations = automations;
+  }
   const settings = await updateSettings(patch as never);
   return NextResponse.json(settings);
 }

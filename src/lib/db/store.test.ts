@@ -166,3 +166,76 @@ describe("周回顾与设置", () => {
     expect((await store.getSettings()).defaultMode).toBe("kanban");
   });
 });
+
+describe("习惯追踪", () => {
+  it("createHabit / listHabits", async () => {
+    const h = await store.createHabit("阅读", "📚");
+    expect(h.name).toBe("阅读");
+    expect(h.icon).toBe("📚");
+    expect(await store.listHabits()).toHaveLength(1);
+  });
+
+  it("toggleHabitCheck 打卡与取消", async () => {
+    const h = await store.createHabit("阅读");
+    expect(await store.toggleHabitCheck(h.id, "2025-01-08")).toEqual({ checked: true });
+    expect(await store.listHabitChecks()).toHaveLength(1);
+    expect(await store.toggleHabitCheck(h.id, "2025-01-08")).toEqual({ checked: false });
+    expect(await store.listHabitChecks()).toHaveLength(0);
+  });
+
+  it("toggleHabitCheck 未知习惯返回 null", async () => {
+    expect(await store.toggleHabitCheck("missing", "2025-01-08")).toBeNull();
+  });
+
+  it("deleteHabit 同时清理打卡记录", async () => {
+    const h = await store.createHabit("阅读");
+    await store.toggleHabitCheck(h.id, "2025-01-08");
+    await store.deleteHabit(h.id);
+    expect(await store.listHabits()).toHaveLength(0);
+    expect(await store.listHabitChecks()).toHaveLength(0);
+  });
+});
+
+describe("自动化运行", () => {
+  it("runAutomations 应用超期青蛙标记且幂等", async () => {
+    const t = await store.createTask({ title: "报告", phase: "action", dueDate: "2020-01-01" });
+    const r = await store.runAutomations();
+    expect(r.applied).toBe(1);
+    expect(r.notifications.length).toBeGreaterThanOrEqual(1);
+    expect((await store.getTask(t.id))!.isFrog).toBe(true);
+    expect((await store.runAutomations()).applied).toBe(0);
+  });
+
+  it("runAutomations 清除已完成任务的青蛙", async () => {
+    const t = await store.createTask({ title: "x", phase: "action", status: "done", isFrog: true });
+    const r = await store.runAutomations();
+    expect(r.applied).toBe(1);
+    expect((await store.getTask(t.id))!.isFrog).toBe(false);
+  });
+
+  it("旧数据迁移：缺失 habits/automations 字段的 db 可正常读取", async () => {
+    const { promises: fs } = await import("node:fs");
+    const { join } = await import("node:path");
+    await store.createTask({ title: "x" }); // 确保数据目录存在
+    const file = join(process.env.DATA_DIR!, "db.json");
+    const old = {
+      tasks: [],
+      projects: [],
+      areas: [],
+      tags: [],
+      weeklyReviews: [],
+      settings: {
+        defaultMode: "gtd",
+        kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
+      },
+    };
+    await fs.writeFile(file, JSON.stringify(old), "utf-8");
+    store.__resetStore();
+    const db = await store.getDb();
+    expect(db.habits).toEqual([]);
+    expect(db.habitChecks).toEqual([]);
+    expect(db.settings.automations.autoFlagOverdueFrog).toBe(true);
+    expect(db.settings.automations.autoClearFrogOnDone).toBe(true);
+    expect(db.settings.automations.staleWaitingReminder).toBe(false);
+  });
+});

@@ -21,6 +21,8 @@ const VIEWS: Array<{ id: ViewId; label: string; icon: string }> = [
   { id: "matrix", label: "四象限", icon: "🧭" },
   { id: "para", label: "PARA", icon: "🗂" },
   { id: "timeblock", label: "时间块", icon: "🕐" },
+  { id: "habits", label: "习惯", icon: "🎯" },
+  { id: "automation", label: "自动化", icon: "⚡" },
   { id: "review", label: "周回顾", icon: "🔁" },
   { id: "trash", label: "回收站", icon: "🗑" },
 ];
@@ -37,6 +39,7 @@ export function Sidebar() {
   const setAreaFilter = useStore((s) => s.setAreaFilter);
   const createProject = useStore((s) => s.createProject);
   const createArea = useStore((s) => s.createArea);
+  const habits = useStore((s) => s.habits);
 
   const counts: Record<ViewId, number> = {
     inbox: selectInbox(tasks).length,
@@ -48,6 +51,8 @@ export function Sidebar() {
     matrix: tasks.filter((t) => t.phase === "action").length,
     para: 0,
     timeblock: tasks.filter((t) => t.scheduledAt).length,
+    habits: habits.length,
+    automation: 0,
     review: 0,
     trash: selectTrash(tasks).length,
   };

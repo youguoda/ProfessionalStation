@@ -77,6 +77,11 @@ describe("selectKanban", () => {
   const settings: Settings = {
     defaultMode: "gtd",
     kanbanWip: { todo: 2, doing: 1, done: -1, canceled: -1 },
+    automations: {
+      autoFlagOverdueFrog: true,
+      autoClearFrogOnDone: true,
+      staleWaitingReminder: false,
+    },
   };
 
   it("按 status 分列、按优先级排序、wip 取自 settings", () => {

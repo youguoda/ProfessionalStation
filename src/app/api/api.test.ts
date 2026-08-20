@@ -9,6 +9,10 @@ import { PATCH as patchProject } from "./projects/[id]/route";
 import { POST as postArea } from "./areas/route";
 import { POST as postTag } from "./tags/route";
 import { PATCH as patchSettings } from "./settings/route";
+import { POST as postHabit } from "./habits/route";
+import { DELETE as deleteHabitRoute } from "./habits/[id]/route";
+import { POST as postCheck } from "./habits/[id]/check/route";
+import { POST as runAutomationsRoute } from "./automations/run/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
@@ -181,5 +185,86 @@ describe("API：设置与项目归档", () => {
       { params: Promise.resolve({ id: p.id }) },
     );
     expect((await r2.json()).archived).toBe(false);
+  });
+});
+
+describe("API：习惯", () => {
+  it("POST /api/habits 空名 400、合法 201", async () => {
+    expect((await postHabit(jsonReq("/api/habits", {}))).status).toBe(400);
+    const res = await postHabit(jsonReq("/api/habits", { name: "阅读", icon: "📚" }));
+    expect(res.status).toBe(201);
+    const habit = await res.json();
+    expect(habit.name).toBe("阅读");
+    expect(habit.icon).toBe("📚");
+  });
+
+  it("toggle check 打卡/取消，未知习惯 404", async () => {
+    const h = await (await postHabit(jsonReq("/api/habits", { name: "运动" }))).json();
+    const r1 = await postCheck(
+      jsonReq(`/api/habits/${h.id}/check`, { date: "2025-01-08" }),
+      { params: Promise.resolve({ id: h.id }) },
+    );
+    expect(r1.status).toBe(200);
+    expect((await r1.json()).checked).toBe(true);
+    const r2 = await postCheck(
+      jsonReq(`/api/habits/${h.id}/check`, { date: "2025-01-08" }),
+      { params: Promise.resolve({ id: h.id }) },
+    );
+    expect((await r2.json()).checked).toBe(false);
+    const r3 = await postCheck(
+      jsonReq("/api/habits/missing/check", { date: "2025-01-08" }),
+      { params: Promise.resolve({ id: "missing" }) },
+    );
+    expect(r3.status).toBe(404);
+  });
+
+  it("非法日期格式 400", async () => {
+    const h = await (await postHabit(jsonReq("/api/habits", { name: "x" }))).json();
+    const res = await postCheck(
+      jsonReq(`/api/habits/${h.id}/check`, { date: "01-08" }),
+      { params: Promise.resolve({ id: h.id }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE 习惯返回 200", async () => {
+    const h = await (await postHabit(jsonReq("/api/habits", { name: "x" }))).json();
+    const res = await deleteHabitRoute(new Request("http://test"), {
+      params: Promise.resolve({ id: h.id }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("API：自动化", () => {
+  it("POST /api/automations/run 应用规则并返回任务", async () => {
+    await create({ title: "报告", phase: "action", dueDate: "2020-01-01" });
+    const res = await runAutomationsRoute();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.applied).toBe(1);
+    expect(body.notifications.length).toBeGreaterThanOrEqual(1);
+    const task = body.tasks.find((t: { title: string }) => t.title === "报告");
+    expect(task.isFrog).toBe(true);
+  });
+
+  it("PATCH settings 更新自动化开关", async () => {
+    const res = await patchSettings(
+      jsonReq(
+        "/api/settings",
+        {
+          automations: {
+            autoFlagOverdueFrog: false,
+            autoClearFrogOnDone: true,
+            staleWaitingReminder: true,
+          },
+        },
+        "PATCH",
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.automations.autoFlagOverdueFrog).toBe(false);
+    expect(body.automations.staleWaitingReminder).toBe(true);
   });
 });

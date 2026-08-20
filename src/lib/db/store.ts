@@ -2,16 +2,18 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   createArea as makeArea,
+  createHabit as makeHabit,
   createProject as makeProject,
   createTag as makeTag,
   createTask as makeTask,
   emptyDb,
   type NewTaskInput,
 } from "@/lib/domain/factory";
-import type { Area, Db, Project, Tag, Task } from "@/lib/domain/types";
+import type { Area, Db, Habit, HabitCheck, Project, Tag, Task } from "@/lib/domain/types";
 import { nextDueDate } from "@/lib/domain/repeat";
 import { transition, type TaskEvent, type TransitionResult } from "@/lib/engine/stateMachine";
 import { isBlocked, wouldCreateCycle } from "@/lib/engine/selectors";
+import { evaluateAutomations } from "@/lib/engine/automations";
 
 /**
  * 文件持久化仓储（MVP：单用户、低并发）。
@@ -36,11 +38,35 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** 旧数据迁移归一化：补齐新增字段（habits/habitChecks/settings.automations） */
+function normalizeDb(raw: Partial<Db>): Db {
+  const defaults = emptyDb();
+  const db = (raw ?? {}) as Partial<Db>;
+  const s = (db.settings ?? {}) as Partial<Db["settings"]>;
+  return {
+    ...defaults,
+    ...db,
+    tasks: Array.isArray(db.tasks) ? db.tasks : [],
+    projects: Array.isArray(db.projects) ? db.projects : [],
+    areas: Array.isArray(db.areas) ? db.areas : [],
+    tags: Array.isArray(db.tags) ? db.tags : [],
+    habits: Array.isArray(db.habits) ? db.habits : [],
+    habitChecks: Array.isArray(db.habitChecks) ? db.habitChecks : [],
+    weeklyReviews: Array.isArray(db.weeklyReviews) ? db.weeklyReviews : [],
+    settings: {
+      ...defaults.settings,
+      ...s,
+      kanbanWip: { ...defaults.settings.kanbanWip, ...(s.kanbanWip ?? {}) },
+      automations: { ...defaults.settings.automations, ...(s.automations ?? {}) },
+    },
+  };
+}
+
 async function readDb(): Promise<Db> {
   if (dbCache) return dbCache;
   try {
     const raw = await fs.readFile(dataPath(), "utf-8");
-    dbCache = JSON.parse(raw) as Db;
+    dbCache = normalizeDb(JSON.parse(raw));
     return dbCache!;
   } catch {
     dbCache = emptyDb();
@@ -266,6 +292,53 @@ export async function getOrCreateTag(name: string, kind: Tag["kind"] = "tag"): P
   });
 }
 
+// ---- Habit ----
+
+export async function listHabits(): Promise<Habit[]> {
+  const db = await readDb();
+  return db.habits;
+}
+
+export async function listHabitChecks(): Promise<HabitCheck[]> {
+  const db = await readDb();
+  return db.habitChecks;
+}
+
+export async function createHabit(name: string, icon?: string): Promise<Habit> {
+  return mutate((db) => {
+    const h = makeHabit(name, icon);
+    db.habits.push(h);
+    return h;
+  });
+}
+
+export async function deleteHabit(id: string): Promise<boolean> {
+  return mutate((db) => {
+    const idx = db.habits.findIndex((h) => h.id === id);
+    if (idx < 0) return false;
+    db.habits.splice(idx, 1);
+    db.habitChecks = db.habitChecks.filter((c) => c.habitId !== id);
+    return true;
+  });
+}
+
+/** 切换某习惯在某天的打卡状态，返回新的打卡状态 */
+export async function toggleHabitCheck(
+  habitId: string,
+  date: string,
+): Promise<{ checked: boolean } | null> {
+  return mutate((db) => {
+    if (!db.habits.some((h) => h.id === habitId)) return null;
+    const idx = db.habitChecks.findIndex((c) => c.habitId === habitId && c.date === date);
+    if (idx >= 0) {
+      db.habitChecks.splice(idx, 1);
+      return { checked: false };
+    }
+    db.habitChecks.push({ id: crypto.randomUUID(), habitId, date });
+    return { checked: true };
+  });
+}
+
 // ---- Weekly Review ----
 
 export async function listWeeklyReviews(): Promise<Db["weeklyReviews"]> {
@@ -303,6 +376,27 @@ export async function updateSettings(patch: Partial<Db["settings"]>): Promise<Db
   return mutate((db) => {
     db.settings = { ...db.settings, ...patch };
     return db.settings;
+  });
+}
+
+// ---- Automations ----
+
+export async function runAutomations(): Promise<{
+  applied: number;
+  notifications: string[];
+  tasks: Task[];
+}> {
+  return mutate((db) => {
+    const result = evaluateAutomations(db.tasks, db.settings.automations);
+    let applied = 0;
+    for (const p of result.patches) {
+      const idx = db.tasks.findIndex((t) => t.id === p.id);
+      if (idx >= 0) {
+        db.tasks[idx] = { ...db.tasks[idx], ...p.patch, updatedAt: new Date().toISOString() };
+        applied += 1;
+      }
+    }
+    return { applied, notifications: result.notifications, tasks: db.tasks };
   });
 }
 

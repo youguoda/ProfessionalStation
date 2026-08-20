@@ -1,4 +1,4 @@
-import type { Area, Db, Project, Tag, Task } from "@/lib/domain/types";
+import type { Area, Db, Habit, Project, Tag, Task } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -47,5 +47,22 @@ export const api = {
     request<Db["weeklyReviews"][number]>("/api/reviews", {
       method: "POST",
       body: JSON.stringify({ notes, checklist }),
+    }),
+
+  createHabit: (name: string, icon?: string) =>
+    request<Habit>("/api/habits", { method: "POST", body: JSON.stringify({ name, icon }) }),
+
+  deleteHabit: (id: string) =>
+    request<{ ok: boolean }>(`/api/habits/${id}`, { method: "DELETE" }),
+
+  toggleHabitCheck: (habitId: string, date: string) =>
+    request<{ checked: boolean }>(`/api/habits/${habitId}/check`, {
+      method: "POST",
+      body: JSON.stringify({ date }),
+    }),
+
+  runAutomations: () =>
+    request<{ applied: number; notifications: string[]; tasks: Task[] }>("/api/automations/run", {
+      method: "POST",
     }),
 };

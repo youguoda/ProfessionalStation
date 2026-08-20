@@ -5,6 +5,7 @@ import { useStore } from "@/store/useStore";
 import { EFFORT_OPTIONS, PHASE_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
 import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
 import { isBlocked } from "@/lib/engine/selectors";
+import { splitCapture } from "@/lib/parsing/capture";
 import type { Priority } from "@/lib/domain/types";
 import { usePomodoro } from "@/store/usePomodoro";
 
@@ -14,6 +15,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const updateTask = useStore((s) => s.updateTask);
   const transition = useStore((s) => s.transition);
   const deleteTask = useStore((s) => s.deleteTask);
+  const addTask = useStore((s) => s.addTask);
   const projects = useStore((s) => s.projects);
   const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
@@ -50,6 +52,24 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
     }
   };
 
+  const splitNotes = async () => {
+    const lines = splitCapture(task.notes);
+    if (lines.length === 0) return;
+    await Promise.all(
+      lines.map((line) =>
+        addTask({
+          title: line,
+          notes: "",
+          phase: task.phase === "action" ? "action" : "inbox",
+          priority: task.priority,
+          projectId: task.projectId,
+          areaId: task.areaId,
+          parentId: task.id,
+        }),
+      ),
+    );
+  };
+
   const addTag = async (kind: "tag" | "context", value: string) => {
     const name = value.trim();
     if (!name) return;
@@ -66,6 +86,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
 
   const tagChips = task.tags.map((tid) => tags.find((t) => t.id === tid)).filter(Boolean);
   const ctxChips = task.contexts.map((tid) => tags.find((t) => t.id === tid)).filter(Boolean);
+  const children = tasks.filter((t) => t.parentId === task.id);
 
   return (
     <div className="fixed inset-0 z-50">
@@ -345,14 +366,51 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           </select>
         </div>
 
+        {children.length > 0 ? (
+          <div className="mt-4">
+            <div className="mb-1 text-xs text-muted-foreground">子任务（{children.length}）</div>
+            <div className="space-y-1">
+              {children.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-2 rounded border bg-muted/30 px-2 py-1.5 text-sm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={c.status === "done"}
+                    onChange={() =>
+                      transition(
+                        c.id,
+                        c.status === "done" ? { type: "reopen" } : { type: "complete" },
+                      ).catch(() => {})
+                    }
+                  />
+                  <span className={c.status === "done" ? "line-through text-muted-foreground" : ""}>
+                    {c.title}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-4">
-          <div className="mb-1 text-xs text-muted-foreground">备注</div>
+          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+            <span>备注</span>
+            <button
+              onClick={splitNotes}
+              disabled={splitCapture(task.notes).length === 0}
+              className="text-primary disabled:opacity-40"
+            >
+              拆分备注为子任务
+            </button>
+          </div>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             onBlur={() => notes !== task.notes && save({ notes })}
             rows={5}
-            placeholder="补充说明…"
+            placeholder="补充说明…（每行一条，可拆分为子任务）"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           />
         </div>

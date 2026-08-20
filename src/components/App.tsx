@@ -10,6 +10,8 @@ import { MatrixView } from "./MatrixView";
 import { WeeklyReviewView } from "./WeeklyReviewView";
 import { ParaView } from "./ParaView";
 import { TimeBlockView } from "./TimeBlockView";
+import { HabitsView } from "./HabitsView";
+import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
 import { TaskDetail } from "./TaskDetail";
 
@@ -73,6 +75,10 @@ export function App() {
                 <WeeklyReviewView />
               ) : view === "para" ? (
                 <ParaView onSelect={setSelectedId} />
+              ) : view === "habits" ? (
+                <HabitsView />
+              ) : view === "automation" ? (
+                <AutomationView />
               ) : (
                 <ListView view={view} onSelect={setSelectedId} />
               )}

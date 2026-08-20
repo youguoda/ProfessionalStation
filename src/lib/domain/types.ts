@@ -98,11 +98,39 @@ export interface WeeklyReview {
   updatedAt: string;
 }
 
+/** 习惯（Atomic Habits 习惯追踪） */
+export interface Habit {
+  id: string;
+  name: string;
+  icon: string;
+  createdAt: string;
+}
+
+/** 习惯打卡记录 */
+export interface HabitCheck {
+  id: string;
+  habitId: string;
+  /** 打卡日期，ISO date (YYYY-MM-DD) */
+  date: string;
+}
+
+/** 自动化规则开关 */
+export interface AutomationSettings {
+  /** 超期任务自动标记为青蛙 */
+  autoFlagOverdueFrog: boolean;
+  /** 完成任务自动清除青蛙标记 */
+  autoClearFrogOnDone: boolean;
+  /** 等待超过 7 天的任务提醒 */
+  staleWaitingReminder: boolean;
+}
+
 export interface Settings {
   /** 全局默认工作流模式 */
   defaultMode: WorkflowMode;
   /** 看板各列 WIP 上限（-1 表示不限） */
   kanbanWip: Record<Status, number>;
+  /** 自动化规则开关 */
+  automations: AutomationSettings;
 }
 
 export interface Db {
@@ -110,6 +138,8 @@ export interface Db {
   projects: Project[];
   areas: Area[];
   tags: Tag[];
+  habits: Habit[];
+  habitChecks: HabitCheck[];
   weeklyReviews: WeeklyReview[];
   settings: Settings;
 }

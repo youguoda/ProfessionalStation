@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { api } from "@/lib/client/api";
-import type { Area, Db, Project, Tag, Task } from "@/lib/domain/types";
+import type { Area, Db, Habit, HabitCheck, Project, Tag, Task } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 
 export type ViewId =
@@ -15,6 +15,8 @@ export type ViewId =
   | "someday"
   | "para"
   | "timeblock"
+  | "habits"
+  | "automation"
   | "review"
   | "trash";
 
@@ -26,8 +28,11 @@ interface AppState {
   projects: Project[];
   areas: Area[];
   tags: Tag[];
+  habits: Habit[];
+  habitChecks: HabitCheck[];
   weeklyReviews: Db["weeklyReviews"];
   settings: Db["settings"];
+  automationLog: { time: string; message: string }[];
 
   view: ViewId;
   search: string;
@@ -51,6 +56,11 @@ interface AppState {
   createTag: (name: string, kind: "tag" | "context") => Promise<Tag>;
   updateSettings: (patch: Record<string, unknown>) => Promise<Db["settings"]>;
   saveReview: (notes: string, checklist: Record<string, boolean>) => Promise<void>;
+
+  createHabit: (name: string, icon?: string) => Promise<Habit>;
+  deleteHabit: (id: string) => Promise<void>;
+  toggleHabitCheck: (habitId: string, date: string) => Promise<void>;
+  runAutomations: () => Promise<{ applied: number; notifications: string[] }>;
 }
 
 function upsert(list: Task[], task: Task): Task[] {
@@ -69,8 +79,15 @@ export const useStore = create<AppState>((set, get) => ({
   projects: [],
   areas: [],
   tags: [],
+  habits: [],
+  habitChecks: [],
   weeklyReviews: [],
-  settings: { defaultMode: "gtd", kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 } },
+  settings: {
+    defaultMode: "gtd",
+    kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
+    automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false },
+  },
+  automationLog: [],
 
   view: "inbox",
   search: "",
@@ -86,11 +103,18 @@ export const useStore = create<AppState>((set, get) => ({
         projects: db.projects,
         areas: db.areas,
         tags: db.tags,
+        habits: db.habits,
+        habitChecks: db.habitChecks,
         weeklyReviews: db.weeklyReviews,
         settings: db.settings,
         loaded: true,
         loading: false,
       });
+      // 自动化：有规则开启时，加载后自动运行一次
+      const a = db.settings.automations;
+      if (a.autoFlagOverdueFrog || a.autoClearFrogOnDone || a.staleWaitingReminder) {
+        await get().runAutomations();
+      }
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "加载失败", loading: false });
     }
@@ -164,5 +188,39 @@ export const useStore = create<AppState>((set, get) => ({
   saveReview: async (notes, checklist) => {
     const review = await api.createReview(notes, checklist);
     set({ weeklyReviews: [...get().weeklyReviews, review] });
+  },
+
+  createHabit: async (name, icon) => {
+    const habit = await api.createHabit(name, icon);
+    set({ habits: [...get().habits, habit] });
+    return habit;
+  },
+
+  deleteHabit: async (id) => {
+    await api.deleteHabit(id);
+    set({
+      habits: get().habits.filter((h) => h.id !== id),
+      habitChecks: get().habitChecks.filter((c) => c.habitId !== id),
+    });
+  },
+
+  toggleHabitCheck: async (habitId, date) => {
+    const { checked } = await api.toggleHabitCheck(habitId, date);
+    set({
+      habitChecks: checked
+        ? [...get().habitChecks, { id: `${habitId}-${date}`, habitId, date }]
+        : get().habitChecks.filter((c) => !(c.habitId === habitId && c.date === date)),
+    });
+  },
+
+  runAutomations: async () => {
+    const result = await api.runAutomations();
+    set({ tasks: result.tasks });
+    if (result.notifications.length > 0) {
+      const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      const entries = result.notifications.map((message) => ({ time, message }));
+      set({ automationLog: [...entries, ...get().automationLog].slice(0, 50) });
+    }
+    return { applied: result.applied, notifications: result.notifications };
   },
 }));

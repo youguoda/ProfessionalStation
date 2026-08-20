@@ -1,4 +1,4 @@
-import type { Area, Db, Project, Settings, Task, Tag } from "./types";
+import type { Area, Db, Habit, Project, Settings, Task, Tag } from "./types";
 
 export function uid(): string {
   // 浏览器与 Node 18+ 均可用
@@ -102,16 +102,32 @@ export function createTag(name: string, kind: Tag["kind"] = "tag"): Tag {
   };
 }
 
+export function createHabit(name: string, icon: string = "🎯"): Habit {
+  return {
+    id: uid(),
+    name: name.trim(),
+    icon,
+    createdAt: nowIso(),
+  };
+}
+
 export function emptyDb(): Db {
   return {
     tasks: [],
     projects: [],
     areas: [],
     tags: [],
+    habits: [],
+    habitChecks: [],
     weeklyReviews: [],
     settings: {
       defaultMode: "gtd",
       kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
+      automations: {
+        autoFlagOverdueFrog: true,
+        autoClearFrogOnDone: true,
+        staleWaitingReminder: false,
+      },
     },
   };
 }

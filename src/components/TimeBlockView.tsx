@@ -14,6 +14,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "@/store/useStore";
 import { isoDay } from "@/lib/engine/selectors";
+import { suggestSchedule } from "@/lib/engine/scheduler";
 import type { Task } from "@/lib/domain/types";
 
 /** 展示的小时槽：8:00 – 21:00 */
@@ -146,6 +147,7 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
   const tasks = useStore((s) => s.tasks);
   const updateTask = useStore((s) => s.updateTask);
   const [offset, setOffset] = useState(0);
+  const [autoScheduled, setAutoScheduled] = useState<number | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const days = weekDays(offset);
@@ -159,6 +161,16 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
     id: "unscheduled",
     data: { unschedule: true },
   });
+
+  function autoSchedule() {
+    const monday = startOfWeek(0);
+    const suggestions = suggestSchedule(tasks, monday);
+    Promise.all(
+      suggestions.map((s) => updateTask(s.taskId, { scheduledAt: s.scheduledAt })),
+    )
+      .then(() => setAutoScheduled(suggestions.length))
+      .catch(() => {});
+  }
 
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -180,6 +192,13 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
       <div className="mb-5 flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">时间块 / 周历</h1>
         <div className="flex items-center gap-2 text-sm">
+          <button
+            onClick={autoSchedule}
+            className="rounded-md border px-2 py-1 text-xs text-primary"
+            title="按优先级自动把未排期任务填入本周空闲时段"
+          >
+            ✨ 智能排期
+          </button>
           <button onClick={() => setOffset((o) => o - 1)} className="rounded-md border px-2 py-1">←</button>
           <button onClick={() => setOffset(0)} className="rounded-md border px-2 py-1">本周</button>
           <button onClick={() => setOffset((o) => o + 1)} className="rounded-md border px-2 py-1">→</button>
@@ -222,6 +241,9 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
 
       <p className="mt-4 text-xs text-muted-foreground">
         把「待排期」任务拖到某一天的某个小时即可精确排期；拖回「待排期」取消排期；点击任务可修改排期时间。
+        {autoScheduled !== null ? (
+          <span className="ml-2 text-primary">✨ 已智能排期 {autoScheduled} 个任务</span>
+        ) : null}
       </p>
     </div>
   );
