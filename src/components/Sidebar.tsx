@@ -40,6 +40,7 @@ export function Sidebar() {
   const createProject = useStore((s) => s.createProject);
   const createArea = useStore((s) => s.createArea);
   const habits = useStore((s) => s.habits);
+  const aiStatus = useStore((s) => s.aiStatus);
 
   const counts: Record<ViewId, number> = {
     inbox: selectInbox(tasks).length,
@@ -59,8 +60,11 @@ export function Sidebar() {
 
   return (
     <aside className="w-60 shrink-0 border-r bg-muted/40 flex flex-col overflow-y-auto">
-      <div className="px-4 py-5 font-semibold tracking-tight">
+      <div className="px-4 pt-5 font-semibold tracking-tight">
         Professional<span className="text-primary">Station</span>
+      </div>
+      <div className="px-4 pb-2 text-[11px] text-muted-foreground">
+        {aiStatus?.enabled ? `🤖 AI 已启用 · ${aiStatus.model}` : "🤖 AI 未配置"}
       </div>
 
       <nav className="px-2 space-y-0.5">

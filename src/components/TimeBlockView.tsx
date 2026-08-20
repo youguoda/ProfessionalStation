@@ -14,8 +14,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "@/store/useStore";
 import { isoDay } from "@/lib/engine/selectors";
-import { suggestSchedule } from "@/lib/engine/scheduler";
+import { suggestSchedule, type SlotSuggestion } from "@/lib/engine/scheduler";
 import type { Task } from "@/lib/domain/types";
+import { api } from "@/lib/client/api";
 
 /** 展示的小时槽：8:00 – 21:00 */
 const HOURS = Array.from({ length: 14 }, (_, i) => 8 + i);
@@ -146,8 +147,13 @@ function DayColumn({
 export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const updateTask = useStore((s) => s.updateTask);
+  const aiStatus = useStore((s) => s.aiStatus);
   const [offset, setOffset] = useState(0);
-  const [autoScheduled, setAutoScheduled] = useState<number | null>(null);
+  const [autoScheduled, setAutoScheduled] = useState<{
+    count: number;
+    source: "ai" | "heuristic";
+  } | null>(null);
+  const [scheduling, setScheduling] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const days = weekDays(offset);
@@ -162,14 +168,29 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
     data: { unschedule: true },
   });
 
-  function autoSchedule() {
-    const monday = startOfWeek(0);
-    const suggestions = suggestSchedule(tasks, monday);
-    Promise.all(
-      suggestions.map((s) => updateTask(s.taskId, { scheduledAt: s.scheduledAt })),
-    )
-      .then(() => setAutoScheduled(suggestions.length))
-      .catch(() => {});
+  async function autoSchedule() {
+    if (scheduling) return;
+    setScheduling(true);
+    try {
+      let suggestions: SlotSuggestion[];
+      let source: "ai" | "heuristic";
+      if (aiStatus?.enabled) {
+        const r = await api.aiSchedule();
+        suggestions = r.suggestions;
+        source = r.source;
+      } else {
+        suggestions = suggestSchedule(tasks, startOfWeek(0));
+        source = "heuristic";
+      }
+      await Promise.all(
+        suggestions.map((s) => updateTask(s.taskId, { scheduledAt: s.scheduledAt })),
+      );
+      setAutoScheduled({ count: suggestions.length, source });
+    } catch {
+      setAutoScheduled(null);
+    } finally {
+      setScheduling(false);
+    }
   }
 
   function handleDragEnd(e: DragEndEvent) {
@@ -194,10 +215,11 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
         <div className="flex items-center gap-2 text-sm">
           <button
             onClick={autoSchedule}
-            className="rounded-md border px-2 py-1 text-xs text-primary"
-            title="按优先级自动把未排期任务填入本周空闲时段"
+            disabled={scheduling}
+            className="rounded-md border px-2 py-1 text-xs text-primary disabled:opacity-50"
+            title="把未排期任务填入本周空闲时段（配置 AI_API_KEY 后由 AI 安排）"
           >
-            ✨ 智能排期
+            {scheduling ? "排期中…" : aiStatus?.enabled ? "🤖 AI 排期" : "✨ 智能排期"}
           </button>
           <button onClick={() => setOffset((o) => o - 1)} className="rounded-md border px-2 py-1">←</button>
           <button onClick={() => setOffset(0)} className="rounded-md border px-2 py-1">本周</button>
@@ -242,7 +264,9 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
       <p className="mt-4 text-xs text-muted-foreground">
         把「待排期」任务拖到某一天的某个小时即可精确排期；拖回「待排期」取消排期；点击任务可修改排期时间。
         {autoScheduled !== null ? (
-          <span className="ml-2 text-primary">✨ 已智能排期 {autoScheduled} 个任务</span>
+          <span className="ml-2 text-primary">
+            {autoScheduled.source === "ai" ? "🤖 AI 已排期" : "✨ 已智能排期"} {autoScheduled.count} 个任务
+          </span>
         ) : null}
       </p>
     </div>

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTempStore } from "@/test/tmpStore";
 import { GET as getBootstrap } from "./bootstrap/route";
 import { POST as postTask } from "./tasks/route";
@@ -13,10 +13,14 @@ import { POST as postHabit } from "./habits/route";
 import { DELETE as deleteHabitRoute } from "./habits/[id]/route";
 import { POST as postCheck } from "./habits/[id]/check/route";
 import { POST as runAutomationsRoute } from "./automations/run/route";
+import { GET as getAiStatus } from "./ai/status/route";
+import { POST as postAiBreakdown } from "./ai/breakdown/route";
+import { POST as postAiSchedule } from "./ai/schedule/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
 afterAll(() => ts.cleanup());
+afterEach(() => vi.unstubAllGlobals());
 
 function jsonReq(url: string, body: unknown, method = "POST"): Request {
   return new Request(`http://test${url}`, {
@@ -266,5 +270,101 @@ describe("API：自动化", () => {
     const body = await res.json();
     expect(body.automations.autoFlagOverdueFrog).toBe(false);
     expect(body.automations.staleWaitingReminder).toBe(true);
+  });
+});
+
+describe("API：AI", () => {
+  it("status 未配置时 enabled=false", async () => {
+    delete process.env.AI_API_KEY;
+    const res = await getAiStatus();
+    expect(res.status).toBe(200);
+    expect((await res.json()).enabled).toBe(false);
+  });
+
+  it("status 配置后 enabled=true 且返回 model", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    process.env.AI_MODEL = "test-model";
+    const body = await (await getAiStatus()).json();
+    expect(body.enabled).toBe(true);
+    expect(body.model).toBe("test-model");
+  });
+
+  it("breakdown 未配置 key → 503", async () => {
+    delete process.env.AI_API_KEY;
+    const res = await postAiBreakdown(jsonReq("/api/ai/breakdown", { title: "写周报", notes: "" }));
+    expect(res.status).toBe(503);
+  });
+
+  it("breakdown 空标题 → 400", async () => {
+    const res = await postAiBreakdown(jsonReq("/api/ai/breakdown", { title: "", notes: "" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("breakdown 配置 key + mock fetch → titles", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"titles":["收集数据","撰写初稿"]}' } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const res = await postAiBreakdown(jsonReq("/api/ai/breakdown", { title: "写周报", notes: "" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).titles).toEqual(["收集数据", "撰写初稿"]);
+  });
+
+  it("schedule 未配置 → 启发式降级", async () => {
+    delete process.env.AI_API_KEY;
+    await create({ title: "任务", phase: "action" });
+    const res = await postAiSchedule();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe("heuristic");
+    expect(body.suggestions).toHaveLength(1);
+  });
+
+  it("schedule 配置 key + mock fetch → source=ai", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    const t = await create({ title: "任务", phase: "action" });
+    // 与服务端一致的「本周一」，保证建议落在合法日期范围
+    const now = new Date();
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay();
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+    // 与服务端 isoDay 一致：用本地日期分量，避免时区偏移
+    const mondayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    suggestions: [{ taskId: t.id, date: mondayStr, hour: 9 }],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const res = await postAiSchedule();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe("ai");
+    expect(body.suggestions).toHaveLength(1);
+    expect(body.suggestions[0].taskId).toBe(t.id);
   });
 });

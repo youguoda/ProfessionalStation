@@ -7,6 +7,7 @@ import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
 import { isBlocked } from "@/lib/engine/selectors";
 import { splitCapture } from "@/lib/parsing/capture";
 import type { Priority } from "@/lib/domain/types";
+import { api } from "@/lib/client/api";
 import { usePomodoro } from "@/store/usePomodoro";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
@@ -20,6 +21,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
   const createTag = useStore((s) => s.createTag);
+  const aiStatus = useStore((s) => s.aiStatus);
 
   const pomodoroStatus = usePomodoro((s) => s.status);
   const focusTaskId = usePomodoro((s) => s.focusTaskId);
@@ -31,6 +33,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const [tagInput, setTagInput] = useState("");
   const [ctxInput, setCtxInput] = useState("");
   const [depError, setDepError] = useState("");
+  const [splitting, setSplitting] = useState(false);
 
   useEffect(() => {
     setTitle(task?.title ?? "");
@@ -53,10 +56,24 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   };
 
   const splitNotes = async () => {
+    if (splitting) return;
     const lines = splitCapture(task.notes);
-    if (lines.length === 0) return;
+    let titles: string[] = [];
+    if (aiStatus?.enabled) {
+      setSplitting(true);
+      try {
+        const result = await api.aiBreakdown(task.title, task.notes);
+        titles = result.titles;
+      } catch {
+        titles = []; // AI 失败时降级到本地按行拆分
+      } finally {
+        setSplitting(false);
+      }
+    }
+    const items = titles.length > 0 ? titles : lines;
+    if (items.length === 0) return;
     await Promise.all(
-      lines.map((line) =>
+      items.map((line) =>
         addTask({
           title: line,
           notes: "",
@@ -399,10 +416,10 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             <span>备注</span>
             <button
               onClick={splitNotes}
-              disabled={splitCapture(task.notes).length === 0}
+              disabled={splitting || (!aiStatus?.enabled && splitCapture(task.notes).length === 0)}
               className="text-primary disabled:opacity-40"
             >
-              拆分备注为子任务
+              {splitting ? "AI 拆分中…" : aiStatus?.enabled ? "🤖 AI 拆分" : "拆分备注为子任务"}
             </button>
           </div>
           <textarea

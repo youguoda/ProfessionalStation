@@ -1,5 +1,6 @@
 import type { Area, Db, Habit, Project, Tag, Task } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
+import type { SlotSuggestion } from "@/lib/engine/scheduler";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -63,6 +64,20 @@ export const api = {
 
   runAutomations: () =>
     request<{ applied: number; notifications: string[]; tasks: Task[] }>("/api/automations/run", {
+      method: "POST",
+    }),
+
+  aiStatus: () =>
+    request<{ enabled: boolean; model: string; baseUrl: string | null }>("/api/ai/status"),
+
+  aiBreakdown: (title: string, notes: string) =>
+    request<{ titles: string[] }>("/api/ai/breakdown", {
+      method: "POST",
+      body: JSON.stringify({ title, notes }),
+    }),
+
+  aiSchedule: () =>
+    request<{ suggestions: SlotSuggestion[]; source: "ai" | "heuristic" }>("/api/ai/schedule", {
       method: "POST",
     }),
 };

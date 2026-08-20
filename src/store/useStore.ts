@@ -33,6 +33,7 @@ interface AppState {
   weeklyReviews: Db["weeklyReviews"];
   settings: Db["settings"];
   automationLog: { time: string; message: string }[];
+  aiStatus: { enabled: boolean; model: string } | null;
 
   view: ViewId;
   search: string;
@@ -88,6 +89,7 @@ export const useStore = create<AppState>((set, get) => ({
     automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false },
   },
   automationLog: [],
+  aiStatus: null,
 
   view: "inbox",
   search: "",
@@ -97,7 +99,10 @@ export const useStore = create<AppState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
-      const db = await api.bootstrap();
+      const [db, aiStatus] = await Promise.all([
+        api.bootstrap(),
+        api.aiStatus().catch(() => null),
+      ]);
       set({
         tasks: db.tasks,
         projects: db.projects,
@@ -107,6 +112,7 @@ export const useStore = create<AppState>((set, get) => ({
         habitChecks: db.habitChecks,
         weeklyReviews: db.weeklyReviews,
         settings: db.settings,
+        aiStatus,
         loaded: true,
         loading: false,
       });
