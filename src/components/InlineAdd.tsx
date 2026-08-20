@@ -41,7 +41,7 @@ export function InlineAdd({
       onChange={(e) => setValue(e.target.value)}
       onBlur={() => !value && setOpen(false)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") submit();
+        if (e.key === "Enter" && !e.nativeEvent.isComposing) submit();
         if (e.key === "Escape") setOpen(false);
       }}
       className="w-full px-2 py-1.5 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary"

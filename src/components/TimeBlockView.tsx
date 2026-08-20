@@ -17,6 +17,7 @@ import { isoDay } from "@/lib/engine/selectors";
 import { suggestSchedule, type SlotSuggestion } from "@/lib/engine/scheduler";
 import type { Task } from "@/lib/domain/types";
 import { api } from "@/lib/client/api";
+import { toastError } from "@/store/useToast";
 
 /** 展示的小时槽：8:00 – 21:00 */
 const HOURS = Array.from({ length: 14 }, (_, i) => 8 + i);
@@ -202,9 +203,9 @@ export function TimeBlockView({ onSelect }: { onSelect: (id: string) => void }) 
     const unschedule = over.data.current?.unschedule as boolean | undefined;
     if (targetDay && targetHour !== undefined) {
       const pad = String(targetHour).padStart(2, "0");
-      updateTask(taskId, { scheduledAt: `${targetDay}T${pad}:00:00` }).catch(() => {});
+      updateTask(taskId, { scheduledAt: `${targetDay}T${pad}:00:00` }).catch((e) => toastError(e));
     } else if (unschedule) {
-      updateTask(taskId, { scheduledAt: null }).catch(() => {});
+      updateTask(taskId, { scheduledAt: null }).catch((e) => toastError(e));
     }
   }
 

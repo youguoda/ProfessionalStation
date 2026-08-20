@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useStore } from "@/store/useStore";
+import { toastError } from "@/store/useToast";
 
 const RULES = [
   {
@@ -37,7 +38,9 @@ export function AutomationView() {
   const automations = settings.automations;
 
   async function toggleRule(key: RuleKey, value: boolean) {
-    await updateSettings({ automations: { ...automations, [key]: value } }).catch(() => {});
+    await updateSettings({ automations: { ...automations, [key]: value } }).catch((e) =>
+      toastError(e),
+    );
   }
 
   async function run() {

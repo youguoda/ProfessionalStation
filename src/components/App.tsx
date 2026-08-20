@@ -15,6 +15,8 @@ import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
 import { TaskDetail } from "./TaskDetail";
 import { AgentPanel } from "./AgentPanel";
+import { ToastViewport } from "./ToastViewport";
+import { triggerUndo } from "@/store/useToast";
 
 export function App() {
   const load = useStore((s) => s.load);
@@ -28,6 +30,18 @@ export function App() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 全局 Cmd/Ctrl+Z 撤销最近一次操作
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        triggerUndo();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   if (error && !loaded) {
     return (
@@ -94,6 +108,7 @@ export function App() {
       ) : null}
       {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
       <PomodoroDock />
+      <ToastViewport />
     </div>
   );
 }

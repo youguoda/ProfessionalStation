@@ -95,10 +95,23 @@ export function selectMatrix(tasks: Task[], now: Date = new Date()): MatrixQuadr
 
 export function selectToday(tasks: Task[], now: Date = new Date()): Task[] {
   const todayStr = isoDay(now);
-  return tasks
-    .filter((t) => t.phase === "action" && t.status !== "done" && t.status !== "canceled")
-    .filter((t) => t.dueDate === todayStr || t.startDate === todayStr || t.isFrog)
-    .sort(byFrogThenPriority);
+  const actionable = tasks.filter(
+    (t) => t.phase === "action" && t.status !== "done" && t.status !== "canceled",
+  );
+  const today = actionable.filter(
+    (t) =>
+      t.dueDate === todayStr ||
+      t.startDate === todayStr ||
+      t.scheduledAt?.slice(0, 10) === todayStr ||
+      t.isFrog,
+  );
+  const overdue = actionable.filter(
+    (t) => t.dueDate !== null && t.dueDate < todayStr && !today.some((x) => x.id === t.id),
+  );
+  // 逾期置顶（越久远的逾期越靠前、标红由 UI 处理），其余青蛙优先 + 优先级
+  const overdueSorted = overdue.sort((a, b) => (a.dueDate! < b.dueDate! ? -1 : 1));
+  const todaySorted = today.sort(byFrogThenPriority);
+  return [...overdueSorted, ...todaySorted];
 }
 
 export function selectOverdue(tasks: Task[], now: Date = new Date()): Task[] {

@@ -110,7 +110,7 @@ export const useStore = create<AppState>((set, get) => ({
   settings: {
     defaultMode: "gtd",
     kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
-    automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false },
+    automations: { autoFlagOverdueFrog: false, autoClearFrogOnDone: true, staleWaitingReminder: false },
   },
   automationLog: [],
   aiStatus: null,
@@ -118,7 +118,7 @@ export const useStore = create<AppState>((set, get) => ({
   agentProfile: null,
   chatMessages: [],
 
-  view: "inbox",
+  view: "today",
   search: "",
   projectFilter: null,
   areaFilter: null,
@@ -169,7 +169,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   transition: async (id, event) => {
-    const task = await api.transition(id, event);
+    const task = await api.transition(id, event).catch((e) => {
+      const t = get().tasks.find((x) => x.id === id);
+      const msg = e instanceof Error ? e.message : "操作失败";
+      throw new Error(t ? `「${t.title}」：${msg}` : msg);
+    });
     set({ tasks: upsert(get().tasks, task) });
     // 重复任务完成时会在服务端生成下一次，重载同步新增实例
     if (task.repeatRule && task.status === "done") {
@@ -179,7 +183,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   updateTask: async (id, patch) => {
-    const task = await api.updateTask(id, patch);
+    const task = await api.updateTask(id, patch).catch((e) => {
+      const t = get().tasks.find((x) => x.id === id);
+      const msg = e instanceof Error ? e.message : "操作失败";
+      throw new Error(t ? `「${t.title}」：${msg}` : msg);
+    });
     set({ tasks: upsert(get().tasks, task) });
     return task;
   },

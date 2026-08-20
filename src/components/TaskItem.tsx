@@ -3,13 +3,15 @@
 import type { Task } from "@/lib/domain/types";
 import { PRIORITY_LABELS } from "@/lib/domain/constants";
 import { isBlocked, isoDay } from "@/lib/engine/selectors";
+import { formatRelativeDate } from "@/lib/parsing/dateFormat";
 import { useStore } from "@/store/useStore";
+import { toastError } from "@/store/useToast";
 
 function dueMeta(task: Task): { text: string; danger: boolean } | null {
   if (!task.dueDate) return null;
   const today = isoDay(new Date());
   const danger = task.dueDate < today && task.status !== "done" && task.status !== "canceled";
-  return { text: task.dueDate, danger };
+  return { text: formatRelativeDate(task.dueDate), danger };
 }
 
 export function TaskItem({
@@ -44,7 +46,7 @@ export function TaskItem({
 
   async function run(e: React.MouseEvent, fn: () => Promise<unknown>) {
     e.stopPropagation();
-    await fn().catch(() => {});
+    await fn().catch((err) => toastError(err));
   }
 
   function Checkbox() {
@@ -118,7 +120,7 @@ export function TaskItem({
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => {
               const target = e.target.value as "action" | "waiting" | "someday" | "reference";
-              transition(task.id, { type: "clarify", target }).catch(() => {});
+              transition(task.id, { type: "clarify", target }).catch((err) => toastError(err));
             }}
             defaultValue=""
             className="rounded border bg-background px-1 py-0.5 text-xs"

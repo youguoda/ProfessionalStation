@@ -130,6 +130,30 @@ describe("selectToday / selectOverdue", () => {
     expect(selectToday(tasks, now).map((t) => t.title)).toEqual(["B", "C", "A"]);
   });
 
+  it("今天排期（scheduledAt）的任务也进入今日", () => {
+    const tasks = [
+      createTask({ title: "排期今天", phase: "action", scheduledAt: "2025-01-08T15:00:00" }),
+      createTask({ title: "排期明天", phase: "action", scheduledAt: "2025-01-09T09:00:00" }),
+      createTask({ title: "无关", phase: "action" }),
+    ];
+    expect(selectToday(tasks, now).map((t) => t.title)).toEqual(["排期今天"]);
+  });
+
+  it("逾期任务置顶进入今日，且越久远的逾期越靠前", () => {
+    const tasks = [
+      createTask({ title: "正常今天", phase: "action", dueDate: "2025-01-08", priority: 1 }),
+      createTask({ title: "逾期1天", phase: "action", dueDate: "2025-01-07", priority: 4 }),
+      createTask({ title: "逾期3天", phase: "action", dueDate: "2025-01-05", priority: 1 }),
+      createTask({ title: "未来", phase: "action", dueDate: "2025-01-20", priority: 1 }),
+      createTask({ title: "已完成逾期", phase: "action", status: "done", dueDate: "2025-01-01" }),
+    ];
+    expect(selectToday(tasks, now).map((t) => t.title)).toEqual([
+      "逾期3天",
+      "逾期1天",
+      "正常今天",
+    ]);
+  });
+
   it("超期 = 截止日期早于今天且未完成", () => {
     const tasks = [
       createTask({ title: "over", phase: "action", dueDate: "2025-01-07" }),

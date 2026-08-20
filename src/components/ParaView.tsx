@@ -3,6 +3,7 @@
 import { useStore } from "@/store/useStore";
 import { TaskItem } from "./TaskItem";
 import type { Task } from "@/lib/domain/types";
+import { toastError } from "@/store/useToast";
 
 function Section({
   title,
@@ -83,7 +84,9 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">{list.length} 项进行中</span>
                       <button
-                        onClick={() => updateProject(p.id, { archived: true }).catch(() => {})}
+                        onClick={() =>
+                          updateProject(p.id, { archived: true }).catch((e) => toastError(e))
+                        }
                         className="text-xs text-muted-foreground hover:text-foreground"
                       >
                         归档
@@ -163,7 +166,9 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
               <span key={p.id} className="flex items-center gap-1 rounded bg-muted px-2 py-1 text-xs">
                 # {p.name}
                 <button
-                  onClick={() => updateProject(p.id, { archived: false }).catch(() => {})}
+                  onClick={() =>
+                    updateProject(p.id, { archived: false }).catch((e) => toastError(e))
+                  }
                   className="text-muted-foreground hover:text-foreground"
                 >
                   恢复

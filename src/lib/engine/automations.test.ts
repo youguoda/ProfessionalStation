@@ -4,24 +4,34 @@ import { defaultAutomationSettings, evaluateAutomations } from "./automations";
 
 const now = new Date(2025, 0, 8); // 2025-01-08
 
+/** 显式开启「超期自动标记青蛙」规则 */
+function frogOn() {
+  return { ...defaultAutomationSettings(), autoFlagOverdueFrog: true };
+}
+
 describe("自动化：超期自动标记青蛙", () => {
-  it("超期且未标记 → 补丁 + 通知", () => {
+  it("默认关闭：超期任务不产生补丁", () => {
     const t = createTask({ title: "报告", phase: "action", dueDate: "2025-01-07" });
-    const r = evaluateAutomations([t], defaultAutomationSettings(), now);
+    expect(evaluateAutomations([t], defaultAutomationSettings(), now).patches).toEqual([]);
+  });
+
+  it("开启后：超期且未标记 → 补丁 + 通知", () => {
+    const t = createTask({ title: "报告", phase: "action", dueDate: "2025-01-07" });
+    const r = evaluateAutomations([t], frogOn(), now);
     expect(r.patches).toEqual([{ id: t.id, patch: { isFrog: true } }]);
     expect(r.notifications).toHaveLength(1);
   });
 
-  it("已标记青蛙 → 幂等无补丁", () => {
+  it("开启后：已标记青蛙 → 幂等无补丁", () => {
     const t = createTask({ title: "报告", phase: "action", dueDate: "2025-01-07", isFrog: true });
-    const r = evaluateAutomations([t], defaultAutomationSettings(), now);
+    const r = evaluateAutomations([t], frogOn(), now);
     expect(r.patches).toEqual([]);
     expect(r.notifications).toEqual([]);
   });
 
-  it("未超期 → 无补丁", () => {
+  it("开启后：未超期 → 无补丁", () => {
     const t = createTask({ title: "报告", phase: "action", dueDate: "2025-01-20" });
-    expect(evaluateAutomations([t], defaultAutomationSettings(), now).patches).toEqual([]);
+    expect(evaluateAutomations([t], frogOn(), now).patches).toEqual([]);
   });
 
   it("规则关闭 → 无补丁", () => {

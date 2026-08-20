@@ -20,6 +20,7 @@ import { useStore } from "@/store/useStore";
 import { selectKanban } from "@/lib/engine/selectors";
 import { PRIORITY_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
 import type { Status, Task } from "@/lib/domain/types";
+import { toastError } from "@/store/useToast";
 
 const COLUMNS: Status[] = ["todo", "doing", "done"];
 
@@ -121,7 +122,9 @@ export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
       target = over.id.replace("col-", "") as Status;
     }
     if (target && source && target !== source) {
-      transition(String(active.id), { type: "setStatus", status: target }).catch(() => {});
+      transition(String(active.id), { type: "setStatus", status: target }).catch((e) =>
+        toastError(e),
+      );
     }
   }
 
@@ -150,7 +153,9 @@ export function KanbanView({ onSelect }: { onSelect: (id: string) => void }) {
                 value={settings.kanbanWip[s] === -1 ? "" : settings.kanbanWip[s]}
                 onChange={(e) => {
                   const v = e.target.value === "" ? -1 : Math.max(0, Number(e.target.value));
-                  updateSettings({ kanbanWip: { ...settings.kanbanWip, [s]: v } }).catch(() => {});
+                  updateSettings({ kanbanWip: { ...settings.kanbanWip, [s]: v } }).catch((e) =>
+                    toastError(e),
+                  );
                 }}
                 className="w-14 rounded-md border bg-background px-1 py-1 text-sm"
               />

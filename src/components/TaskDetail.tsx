@@ -6,9 +6,10 @@ import { EFFORT_OPTIONS, PHASE_LABELS, STATUS_LABELS } from "@/lib/domain/consta
 import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
 import { isBlocked } from "@/lib/engine/selectors";
 import { splitCapture } from "@/lib/parsing/capture";
-import type { Priority } from "@/lib/domain/types";
+import type { Priority, Task } from "@/lib/domain/types";
 import { api } from "@/lib/client/api";
 import { usePomodoro } from "@/store/usePomodoro";
+import { toastError } from "@/store/useToast";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -34,16 +35,51 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const [ctxInput, setCtxInput] = useState("");
   const [depError, setDepError] = useState("");
   const [splitting, setSplitting] = useState(false);
+  const [frogConflict, setFrogConflict] = useState<Task | null>(null);
 
   useEffect(() => {
     setTitle(task?.title ?? "");
     setNotes(task?.notes ?? "");
   }, [task?.id, task?.title, task?.notes]);
 
+  // Esc 关闭抽屉
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   if (!task) return null;
 
   const save = (patch: Record<string, unknown>) => {
-    updateTask(task.id, patch).catch(() => {});
+    updateTask(task.id, patch).catch((e) => toastError(e));
+  };
+
+  /** 设置青蛙：若已有青蛙则先弹替换确认 */
+  const setFrog = async (checked: boolean) => {
+    if (!checked) {
+      save({ isFrog: false });
+      return;
+    }
+    const other = tasks.find((t) => t.id !== task.id && t.isFrog);
+    if (other) {
+      setFrogConflict(other);
+      return;
+    }
+    save({ isFrog: true });
+  };
+
+  const replaceFrog = async () => {
+    const other = frogConflict;
+    setFrogConflict(null);
+    try {
+      if (other) await updateTask(other.id, { isFrog: false });
+      await updateTask(task.id, { isFrog: true });
+    } catch (e) {
+      toastError(e);
+    }
   };
 
   const addDependency = async (depId: string) => {
@@ -127,7 +163,11 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
 
         <div className="mb-4 flex flex-wrap gap-2">
           <button
-            onClick={() => transition(task.id, { type: task.status === "doing" ? "complete" : "start" }).catch(() => {})}
+            onClick={() =>
+              transition(task.id, {
+                type: task.status === "doing" ? "complete" : "start",
+              }).catch((e) => toastError(e))
+            }
             disabled={task.phase !== "action"}
             className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-40"
           >
@@ -154,7 +194,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
                 transition(task.id, {
                   type: "clarify",
                   target: e.target.value as "action" | "waiting" | "someday" | "reference",
-                }).catch(() => {})
+                }).catch((err) => toastError(err))
               }
               defaultValue=""
               className="rounded-md border bg-background px-3 py-1.5 text-xs"
@@ -168,7 +208,9 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           ) : null}
           {task.phase === "someday" ? (
             <button
-              onClick={() => transition(task.id, { type: "clarify", target: "action" }).catch(() => {})}
+              onClick={() =>
+                transition(task.id, { type: "clarify", target: "action" }).catch((e) => toastError(e))
+              }
               className="rounded-md border px-3 py-1.5 text-xs"
             >
               转为行动
@@ -176,14 +218,14 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           ) : null}
           {task.phase === "trash" ? (
             <button
-              onClick={() => transition(task.id, { type: "restore" }).catch(() => {})}
+              onClick={() => transition(task.id, { type: "restore" }).catch((e) => toastError(e))}
               className="rounded-md border px-3 py-1.5 text-xs"
             >
               恢复
             </button>
           ) : (
             <button
-              onClick={() => transition(task.id, { type: "trash" }).catch(() => {})}
+              onClick={() => transition(task.id, { type: "trash" }).catch((e) => toastError(e))}
               className="rounded-md border px-3 py-1.5 text-xs text-red-500"
             >
               移入回收站
@@ -300,10 +342,23 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             <input
               type="checkbox"
               checked={task.isFrog}
-              onChange={(e) => save({ isFrog: e.target.checked })}
+              onChange={(e) => setFrog(e.target.checked)}
             />
-            🐸 标记为青蛙（今天最重要）
+            🐸 标记为青蛙（今天最重要，同时只能有一只）
           </label>
+          {frogConflict ? (
+            <div className="col-span-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs">
+              已有一只青蛙「{frogConflict.title}」，要替换成当前任务吗？
+              <span className="ml-2">
+                <button onClick={replaceFrog} className="font-medium text-primary">
+                  替换
+                </button>
+                <button onClick={() => setFrogConflict(null)} className="ml-2 text-muted-foreground">
+                  取消
+                </button>
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4">
@@ -318,7 +373,9 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           <input
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addTag("tag", tagInput)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && !e.nativeEvent.isComposing && addTag("tag", tagInput)
+            }
             placeholder="输入标签，回车添加"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           />
@@ -336,7 +393,9 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           <input
             value={ctxInput}
             onChange={(e) => setCtxInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addTag("context", ctxInput)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && !e.nativeEvent.isComposing && addTag("context", ctxInput)
+            }
             placeholder="如 @home / @办公室，回车添加"
             className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
           />
@@ -399,7 +458,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
                       transition(
                         c.id,
                         c.status === "done" ? { type: "reopen" } : { type: "complete" },
-                      ).catch(() => {})
+                      ).catch((e) => toastError(e))
                     }
                   />
                   <span className={c.status === "done" ? "line-through text-muted-foreground" : ""}>

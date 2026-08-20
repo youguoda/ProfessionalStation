@@ -66,7 +66,7 @@ export function evaluateAutomations(
 
 export function defaultAutomationSettings(): AutomationSettings {
   return {
-    autoFlagOverdueFrog: true,
+    autoFlagOverdueFrog: false,
     autoClearFrogOnDone: true,
     staleWaitingReminder: false,
   };

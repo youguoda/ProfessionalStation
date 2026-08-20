@@ -62,6 +62,35 @@ describe("依赖成环防护", () => {
   });
 });
 
+describe("青蛙约束", () => {
+  it("第一只青蛙可设置", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const r = await store.updateTask(a.id, { isFrog: true });
+    expect(r.ok).toBe(true);
+  });
+
+  it("第二只青蛙被拒绝并返回 INVALID_FROG", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const b = await store.createTask({ title: "b", phase: "action" });
+    await store.updateTask(a.id, { isFrog: true });
+    const r = await store.updateTask(b.id, { isFrog: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("INVALID_FROG");
+      expect(r.error).toContain("a");
+    }
+  });
+
+  it("先取消旧青蛙再设新的可成功", async () => {
+    const a = await store.createTask({ title: "a", phase: "action" });
+    const b = await store.createTask({ title: "b", phase: "action" });
+    await store.updateTask(a.id, { isFrog: true });
+    await store.updateTask(a.id, { isFrog: false });
+    const r = await store.updateTask(b.id, { isFrog: true });
+    expect(r.ok).toBe(true);
+  });
+});
+
 describe("重复任务", () => {
   it("完成 daily 任务自动生成下一次", async () => {
     const t = await store.createTask({
@@ -198,12 +227,22 @@ describe("习惯追踪", () => {
 
 describe("自动化运行", () => {
   it("runAutomations 应用超期青蛙标记且幂等", async () => {
+    await store.updateSettings({
+      automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false },
+    });
     const t = await store.createTask({ title: "报告", phase: "action", dueDate: "2020-01-01" });
     const r = await store.runAutomations();
     expect(r.applied).toBe(1);
     expect(r.notifications.length).toBeGreaterThanOrEqual(1);
     expect((await store.getTask(t.id))!.isFrog).toBe(true);
     expect((await store.runAutomations()).applied).toBe(0);
+  });
+
+  it("默认关闭：runAutomations 不自动标记青蛙", async () => {
+    const t = await store.createTask({ title: "报告", phase: "action", dueDate: "2020-01-01" });
+    const r = await store.runAutomations();
+    expect(r.applied).toBe(0);
+    expect((await store.getTask(t.id))!.isFrog).toBe(false);
   });
 
   it("runAutomations 清除已完成任务的青蛙", async () => {
@@ -234,7 +273,7 @@ describe("自动化运行", () => {
     const db = await store.getDb();
     expect(db.habits).toEqual([]);
     expect(db.habitChecks).toEqual([]);
-    expect(db.settings.automations.autoFlagOverdueFrog).toBe(true);
+    expect(db.settings.automations.autoFlagOverdueFrog).toBe(false);
     expect(db.settings.automations.autoClearFrogOnDone).toBe(true);
     expect(db.settings.automations.staleWaitingReminder).toBe(false);
   });

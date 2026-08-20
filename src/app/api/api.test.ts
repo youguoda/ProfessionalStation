@@ -245,6 +245,13 @@ describe("API：习惯", () => {
 
 describe("API：自动化", () => {
   it("POST /api/automations/run 应用规则并返回任务", async () => {
+    await patchSettings(
+      jsonReq(
+        "/api/settings",
+        { automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false } },
+        "PATCH",
+      ),
+    );
     await create({ title: "报告", phase: "action", dueDate: "2020-01-01" });
     const res = await runAutomationsRoute();
     expect(res.status).toBe(200);

@@ -20,7 +20,8 @@ describe("buildAgentContext", () => {
     };
     const s = buildAgentContext(db, now);
     expect(s).toContain("今天是 2025-01-08。");
-    expect(s).toContain("【今日】1 个任务：");
+    // 逾期任务置顶进「今日」（视图一致性），因此今日=2
+    expect(s).toContain("【今日】2 个任务：");
     expect(s).toContain("今日任务");
     expect(s).toContain("【超期】1 个：");
     expect(s).toContain("超期任务");

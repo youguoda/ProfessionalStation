@@ -133,7 +133,7 @@ export function emptyDb(): Db {
       defaultMode: "gtd",
       kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
       automations: {
-        autoFlagOverdueFrog: true,
+        autoFlagOverdueFrog: false,
         autoClearFrogOnDone: true,
         staleWaitingReminder: false,
       },

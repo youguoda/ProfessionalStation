@@ -142,7 +142,7 @@ export async function createTask(input: NewTaskInput): Promise<Task> {
 
 export type UpdateTaskResult =
   | { ok: true; task: Task }
-  | { ok: false; error: string; code: "NOT_FOUND" | "INVALID_DEPENDENCY" };
+  | { ok: false; error: string; code: "NOT_FOUND" | "INVALID_DEPENDENCY" | "INVALID_FROG" };
 
 export async function updateTask(
   id: string,
@@ -162,6 +162,18 @@ export async function updateTask(
             code: "INVALID_DEPENDENCY",
           };
         }
+      }
+    }
+
+    // 青蛙约束：同时最多一只
+    if (patch.isFrog === true) {
+      const other = db.tasks.find((t) => t.id !== id && t.isFrog && t.phase !== "trash");
+      if (other) {
+        return {
+          ok: false,
+          error: `已存在青蛙任务「${other.title}」，同时只能有一只青蛙`,
+          code: "INVALID_FROG",
+        };
       }
     }
 

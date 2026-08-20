@@ -6,6 +6,7 @@ import { api } from "@/lib/client/api";
 import { proposalLabel } from "@/lib/agent/tools";
 import type { ActionProposal, ChatMessage } from "@/lib/domain/types";
 import { AgentSettings } from "./AgentSettings";
+import { toastError } from "@/store/useToast";
 
 function ProposalCard({
   message,
@@ -98,7 +99,9 @@ function ProposalCard({
             {busy ? "执行中…" : "✓ 执行"}
           </button>
           <button
-            onClick={() => resolveProposal(message.id, proposal.id, "denied").catch(() => {})}
+            onClick={() =>
+              resolveProposal(message.id, proposal.id, "denied").catch((e) => toastError(e))
+            }
             className="rounded-md border px-2 py-1 text-xs"
           >
             忽略
@@ -127,6 +130,17 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [chatMessages.length, showSettings, streaming, pendingUser]);
+
+  // Esc：设置页返回聊天，聊天页关闭面板
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (showSettings) setShowSettings(false);
+      else onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSettings, onClose]);
 
   async function submit() {
     const t = text.trim();
@@ -178,7 +192,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
               ⚙
             </button>
             <button
-              onClick={() => clearChat().catch(() => {})}
+              onClick={() => clearChat().catch((e) => toastError(e))}
               title="清空对话"
               className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
             >
@@ -263,7 +277,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") submit();
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) submit();
                   }}
                   disabled={!aiStatus?.enabled}
                   placeholder={
