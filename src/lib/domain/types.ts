@@ -56,6 +56,8 @@ export interface Task {
   contexts: string[];
   /** 今日「吃青蛙」标记 */
   isFrog: boolean;
+  /** 活动历史（关键变更记录，上限 50） */
+  history: Array<{ at: string; label: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +126,8 @@ export interface AutomationSettings {
   staleWaitingReminder: boolean;
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
 export interface Settings {
   /** 全局默认工作流模式 */
   defaultMode: WorkflowMode;
@@ -131,6 +135,8 @@ export interface Settings {
   kanbanWip: Record<Status, number>;
   /** 自动化规则开关 */
   automations: AutomationSettings;
+  /** 主题（浅色/深色/跟随系统） */
+  theme: ThemeMode;
 }
 
 /** 马力可建议的操作类型（HITL：仅建议，经用户确认后执行） */

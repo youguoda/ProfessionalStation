@@ -11,6 +11,21 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   4: "P4 · 低",
 };
 
+export const PRIORITY_SHORT: Record<Priority, string> = {
+  1: "P1",
+  2: "P2",
+  3: "P3",
+  4: "P4",
+};
+
+/** 优先级色条（任务行左侧 3px） */
+export const PRIORITY_BAR: Record<Priority, string> = {
+  1: "bg-destructive",
+  2: "bg-warning",
+  3: "bg-primary/70",
+  4: "bg-muted-foreground/40",
+};
+
 export const EFFORT_OPTIONS = [1, 2, 3, 5, 8] as const;
 
 export const PHASE_LABELS: Record<Phase, string> = {

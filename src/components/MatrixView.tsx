@@ -1,19 +1,22 @@
 "use client";
 
+import { useMemo } from "react";
 import { useStore } from "@/store/useStore";
-import { selectMatrix } from "@/lib/engine/selectors";
-import { PRIORITY_LABELS } from "@/lib/domain/constants";
+import { blockedIdSet, selectMatrix } from "@/lib/engine/selectors";
+import { useTaskMeta } from "@/lib/client/useTaskMeta";
 import { TaskItem } from "./TaskItem";
 
 const QUADRANT_STYLE: Record<string, string> = {
-  q1: "border-red-200 bg-red-50/40",
-  q2: "border-blue-200 bg-blue-50/40",
-  q3: "border-amber-200 bg-amber-50/40",
-  q4: "border-neutral-200 bg-neutral-50/40",
+  q1: "border-quadrant-1/30 bg-quadrant-1/10",
+  q2: "border-quadrant-2/30 bg-quadrant-2/10",
+  q3: "border-quadrant-3/30 bg-quadrant-3/10",
+  q4: "border-quadrant-4/30 bg-quadrant-4/10",
 };
 
 export function MatrixView({ onSelect }: { onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
+  const meta = useTaskMeta();
+  const blockedIds = useMemo(() => blockedIdSet(tasks), [tasks]);
   const quadrants = selectMatrix(tasks);
 
   return (
@@ -34,7 +37,13 @@ export function MatrixView({ onSelect }: { onSelect: (id: string) => void }) {
             </div>
             <div className="space-y-1.5">
               {q.tasks.map((t) => (
-                <TaskItem key={t.id} task={t} onSelect={onSelect} />
+                <TaskItem
+                  key={t.id}
+                  task={t}
+                  meta={meta}
+                  blocked={blockedIds.has(t.id)}
+                  onSelect={onSelect}
+                />
               ))}
               {q.tasks.length === 0 ? (
                 <p className="py-6 text-center text-xs text-muted-foreground">空</p>

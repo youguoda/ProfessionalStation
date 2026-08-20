@@ -24,6 +24,10 @@ export function ListView({
   const setSearch = useStore((s) => s.setSearch);
   const projectFilter = useStore((s) => s.projectFilter);
   const areaFilter = useStore((s) => s.areaFilter);
+  const setProjectFilter = useStore((s) => s.setProjectFilter);
+  const setAreaFilter = useStore((s) => s.setAreaFilter);
+  const projects = useStore((s) => s.projects);
+  const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
 
   let list: Task[];
@@ -103,6 +107,53 @@ export function ListView({
           className="w-48 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary/40"
         />
       </PageHeader>
+
+      {search || projectFilter || areaFilter ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">筛选：</span>
+          {search ? (
+            <span className="flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5">
+              搜索「{search}」
+              <button
+                onClick={() => setSearch("")}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </span>
+          ) : null}
+          {projectFilter ? (
+            <span className="flex items-center gap-1 rounded-full border bg-primary/10 px-2 py-0.5 text-primary">
+              #{projects.find((p) => p.id === projectFilter)?.name ?? "项目"}
+              <button
+                onClick={() => setProjectFilter(null)}
+                className="hover:text-foreground"
+              >
+                ✕
+              </button>
+            </span>
+          ) : null}
+          {areaFilter ? (
+            <span className="flex items-center gap-1 rounded-full border bg-primary/10 px-2 py-0.5 text-primary">
+              {areas.find((a) => a.id === areaFilter)?.icon}{" "}
+              {areas.find((a) => a.id === areaFilter)?.name ?? "领域"}
+              <button onClick={() => setAreaFilter(null)} className="hover:text-foreground">
+                ✕
+              </button>
+            </span>
+          ) : null}
+          <button
+            onClick={() => {
+              setSearch("");
+              setProjectFilter(null);
+              setAreaFilter(null);
+            }}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            清除全部
+          </button>
+        </div>
+      ) : null}
 
       <TaskList
         title={title}

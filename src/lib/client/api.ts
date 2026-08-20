@@ -37,7 +37,10 @@ export const api = {
     request<{ ok: boolean }>(`/api/tasks/${id}`, { method: "DELETE" }),
 
   transition: (id: string, event: TaskEvent) =>
-    request<Task>(`/api/tasks/${id}/transition`, { method: "POST", body: JSON.stringify(event) }),
+    request<{ task: Task; spawned: Task | null }>(`/api/tasks/${id}/transition`, {
+      method: "POST",
+      body: JSON.stringify(event),
+    }),
 
   createProject: (name: string) =>
     request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),

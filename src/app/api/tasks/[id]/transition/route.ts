@@ -25,5 +25,5 @@ export async function POST(
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 409 });
   }
-  return NextResponse.json(result.task);
+  return NextResponse.json({ task: result.task, spawned: result.spawned ?? null });
 }

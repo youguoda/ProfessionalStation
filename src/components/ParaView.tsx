@@ -1,9 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { useStore } from "@/store/useStore";
 import { TaskItem } from "./TaskItem";
 import type { Task } from "@/lib/domain/types";
 import { toastError } from "@/store/useToast";
+import { blockedIdSet } from "@/lib/engine/selectors";
+import { useTaskMeta } from "@/lib/client/useTaskMeta";
 
 function Section({
   title,
@@ -39,6 +42,8 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
   const areas = useStore((s) => s.areas);
   const tags = useStore((s) => s.tags);
   const updateProject = useStore((s) => s.updateProject);
+  const meta = useTaskMeta();
+  const blockedIds = useMemo(() => blockedIdSet(tasks), [tasks]);
 
   const activeProjects = projects.filter((p) => !p.archived);
   const archivedProjects = projects.filter((p) => p.archived);
@@ -98,7 +103,7 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
                   ) : (
                     <div className="space-y-1.5">
                       {list.map((t) => (
-                        <TaskItem key={t.id} task={t} onSelect={onSelect} />
+                        <TaskItem key={t.id} task={t} meta={meta} blocked={blockedIds.has(t.id)} onSelect={onSelect} />
                       ))}
                     </div>
                   )}
@@ -127,7 +132,7 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
                   ) : (
                     <div className="space-y-1.5">
                       {list.map((t) => (
-                        <TaskItem key={t.id} task={t} onSelect={onSelect} />
+                        <TaskItem key={t.id} task={t} meta={meta} blocked={blockedIds.has(t.id)} onSelect={onSelect} />
                       ))}
                     </div>
                   )}
@@ -150,7 +155,7 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
                 </h3>
                 <div className="space-y-1.5">
                   {list.map((t) => (
-                    <TaskItem key={t.id} task={t} onSelect={onSelect} />
+                    <TaskItem key={t.id} task={t} meta={meta} blocked={blockedIds.has(t.id)} onSelect={onSelect} />
                   ))}
                 </div>
               </div>
@@ -182,7 +187,7 @@ export function ParaView({ onSelect }: { onSelect: (id: string) => void }) {
         ) : (
           <div className="space-y-1.5">
             {doneTasks.slice(0, 30).map((t) => (
-              <TaskItem key={t.id} task={t} onSelect={onSelect} />
+              <TaskItem key={t.id} task={t} meta={meta} blocked={blockedIds.has(t.id)} onSelect={onSelect} />
             ))}
           </div>
         )}

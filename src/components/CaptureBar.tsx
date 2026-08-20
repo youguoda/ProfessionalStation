@@ -60,6 +60,7 @@ export function CaptureBar() {
     <div className="border-b bg-background/80 backdrop-blur px-6 py-4">
       <div className="max-w-3xl mx-auto relative">
         <textarea
+          id="capture-input"
           ref={inputRef}
           value={value}
           rows={rows}

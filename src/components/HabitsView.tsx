@@ -77,7 +77,7 @@ export function HabitsView() {
                   <span className="truncate">{h.name}</span>
                   <button
                     onClick={() => deleteHabit(h.id)}
-                    className="ml-1 hidden text-xs text-muted-foreground hover:text-red-500 group-hover:inline"
+                    className="ml-1 hidden text-xs text-muted-foreground hover:text-destructive group-hover:inline"
                   >
                     ✕
                   </button>

@@ -49,7 +49,7 @@ export function WeeklyReviewView() {
       </div>
 
       {stats.projectsWithoutAction.length > 0 ? (
-        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <div className="mb-5 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           以下项目没有下一步行动：{stats.projectsWithoutAction.join("、")}
         </div>
       ) : null}
@@ -105,8 +105,8 @@ export function WeeklyReviewView() {
 
 function Stat({ label, value, warn }: { label: string; value: number; warn?: boolean }) {
   return (
-    <div className={`rounded-lg border px-3 py-3 ${warn ? "border-red-200 bg-red-50" : "bg-background"}`}>
-      <div className={`text-2xl font-semibold ${warn ? "text-red-600" : ""}`}>{value}</div>
+    <div className={`rounded-lg border px-3 py-3 ${warn ? "border-destructive/30 bg-destructive/10" : "bg-background"}`}>
+      <div className={`text-2xl font-semibold ${warn ? "text-destructive" : ""}`}>{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );

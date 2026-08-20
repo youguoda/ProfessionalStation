@@ -11,6 +11,9 @@ export async function PATCH(req: Request) {
   const patch: Record<string, unknown> = {};
   if (typeof body.defaultMode === "string") patch.defaultMode = body.defaultMode;
   if (body.kanbanWip && typeof body.kanbanWip === "object") patch.kanbanWip = body.kanbanWip;
+  if (body.theme === "light" || body.theme === "dark" || body.theme === "system") {
+    patch.theme = body.theme;
+  }
   if (body.automations && typeof body.automations === "object") {
     const a = body.automations as Record<string, unknown>;
     const automations: Record<string, boolean> = {};

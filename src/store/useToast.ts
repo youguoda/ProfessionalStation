@@ -27,11 +27,15 @@ interface ToastState {
   dismiss: (id: string) => void;
   undo: UndoEntry | null;
   setUndo: (entry: UndoEntry | null) => void;
+  /** 刚完成的任务（完成动效：划线停留后淡出） */
+  completedFx: Record<string, number>;
+  markCompleted: (id: string) => void;
 }
 
 export const useToast = create<ToastState>((set, get) => ({
   toasts: [],
   undo: null,
+  completedFx: {},
 
   show: (t) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -42,6 +46,15 @@ export const useToast = create<ToastState>((set, get) => ({
   dismiss: (id) => set({ toasts: get().toasts.filter((x) => x.id !== id) }),
 
   setUndo: (entry) => set({ undo: entry }),
+
+  markCompleted: (id) => {
+    set({ completedFx: { ...get().completedFx, [id]: Date.now() } });
+    setTimeout(() => {
+      const next = { ...get().completedFx };
+      delete next[id];
+      set({ completedFx: next });
+    }, 1600);
+  },
 }));
 
 export function toast(t: Omit<Toast, "id">) {

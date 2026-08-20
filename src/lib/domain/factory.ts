@@ -58,6 +58,7 @@ export function createTask(input: NewTaskInput): Task {
     tags: input.tags ?? [],
     contexts: input.contexts ?? [],
     isFrog: input.isFrog ?? false,
+    history: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -137,6 +138,7 @@ export function emptyDb(): Db {
         autoClearFrogOnDone: true,
         staleWaitingReminder: false,
       },
+      theme: "system",
     },
     agentProfile: defaultAgentProfile(),
     chatMessages: [],

@@ -10,6 +10,7 @@ import type { Priority, Task } from "@/lib/domain/types";
 import { api } from "@/lib/client/api";
 import { usePomodoro } from "@/store/usePomodoro";
 import { toastError } from "@/store/useToast";
+import { Markdown } from "@/lib/markdown";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -35,6 +36,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const [ctxInput, setCtxInput] = useState("");
   const [depError, setDepError] = useState("");
   const [splitting, setSplitting] = useState(false);
+  const [previewNotes, setPreviewNotes] = useState(false);
   const [frogConflict, setFrogConflict] = useState<Task | null>(null);
 
   useEffect(() => {
@@ -226,7 +228,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           ) : (
             <button
               onClick={() => transition(task.id, { type: "trash" }).catch((e) => toastError(e))}
-              className="rounded-md border px-3 py-1.5 text-xs text-red-500"
+              className="rounded-md border px-3 py-1.5 text-xs text-destructive"
             >
               移入回收站
             </button>
@@ -347,7 +349,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             🐸 标记为青蛙（今天最重要，同时只能有一只）
           </label>
           {frogConflict ? (
-            <div className="col-span-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs">
+            <div className="col-span-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs">
               已有一只青蛙「{frogConflict.title}」，要替换成当前任务吗？
               <span className="ml-2">
                 <button onClick={replaceFrog} className="font-medium text-primary">
@@ -404,7 +406,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
         <div className="mt-4">
           <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
             <span>依赖（先完成才能开始）</span>
-            {isBlocked(task, tasks) ? <span className="text-amber-600">🔒 被阻塞</span> : null}
+            {isBlocked(task, tasks) ? <span className="text-warning">🔒 被阻塞</span> : null}
           </div>
           <div className="mb-2 flex flex-wrap gap-1">
             {task.blockedBy.map((did) => {
@@ -414,7 +416,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
                   {dep ? dep.title : "已删除"}
                   <button
                     onClick={() => save({ blockedBy: task.blockedBy.filter((x) => x !== did) })}
-                    className="text-muted-foreground hover:text-red-500"
+                    className="text-muted-foreground hover:text-destructive"
                   >
                     ✕
                   </button>
@@ -424,7 +426,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
             {task.blockedBy.length === 0 ? <span className="text-xs text-muted-foreground">无</span> : null}
           </div>
           {depError ? (
-            <p className="mb-1 text-xs text-red-500">{depError}</p>
+            <p className="mb-1 text-xs text-destructive">{depError}</p>
           ) : null}
           <select
             onChange={(e) => {
@@ -473,28 +475,65 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
         <div className="mt-4">
           <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
             <span>备注</span>
-            <button
-              onClick={splitNotes}
-              disabled={splitting || (!aiStatus?.enabled && splitCapture(task.notes).length === 0)}
-              className="text-primary disabled:opacity-40"
-            >
-              {splitting ? "AI 拆分中…" : aiStatus?.enabled ? "🤖 AI 拆分" : "拆分备注为子任务"}
-            </button>
+            <span className="flex items-center gap-2">
+              <button
+                onClick={() => setPreviewNotes((v) => !v)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                {previewNotes ? "编辑" : "预览"}
+              </button>
+              <button
+                onClick={splitNotes}
+                disabled={splitting || (!aiStatus?.enabled && splitCapture(task.notes).length === 0)}
+                className="text-primary disabled:opacity-40"
+              >
+                {splitting ? "AI 拆分中…" : aiStatus?.enabled ? "🤖 AI 拆分" : "拆分备注为子任务"}
+              </button>
+            </span>
           </div>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            onBlur={() => notes !== task.notes && save({ notes })}
-            rows={5}
-            placeholder="补充说明…（每行一条，可拆分为子任务）"
-            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-          />
+          {previewNotes ? (
+            <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-sm">
+              <Markdown text={task.notes} />
+            </div>
+          ) : (
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onBlur={() => notes !== task.notes && save({ notes })}
+              rows={5}
+              placeholder="补充说明…（每行一条，可拆分为子任务）"
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            />
+          )}
         </div>
+
+        {task.history?.length ? (
+          <div className="mt-6 border-t pt-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              活动记录
+            </div>
+            <div className="space-y-1">
+              {[...task.history].reverse().slice(0, 10).map((h, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-mono text-[10px]">
+                    {new Date(h.at).toLocaleString("zh-CN", {
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                  {h.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-6 border-t pt-4">
           <button
             onClick={() => deleteTask(task.id).then(onClose)}
-            className="text-xs text-red-500"
+            className="text-xs text-destructive"
           >
             {task.phase === "trash" ? "永久删除" : "移入回收站"}
           </button>

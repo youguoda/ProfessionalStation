@@ -18,9 +18,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "@/store/useStore";
 import { selectKanban } from "@/lib/engine/selectors";
-import { PRIORITY_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
+import { PRIORITY_SHORT, STATUS_LABELS } from "@/lib/domain/constants";
 import type { Status, Task } from "@/lib/domain/types";
 import { toastError } from "@/store/useToast";
+import { formatRelativeDate } from "@/lib/parsing/dateFormat";
 
 const COLUMNS: Status[] = ["todo", "doing", "done"];
 
@@ -44,10 +45,10 @@ function Card({ task, onSelect }: { task: Task; onSelect: (id: string) => void }
       <div className="leading-snug">{task.title}</div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         <span className="font-medium text-foreground/70">
-          {PRIORITY_LABELS[task.priority].split(" ")[0]}
+          {PRIORITY_SHORT[task.priority]}
         </span>
-        {task.effort ? <span>⏱{task.effort}</span> : null}
-        {task.dueDate ? <span>📅 {task.dueDate}</span> : null}
+        {task.effort ? <span>{task.effort}pt</span> : null}
+        {task.dueDate ? <span>{formatRelativeDate(task.dueDate)}</span> : null}
         {task.isFrog ? <span>🐸</span> : null}
       </div>
     </div>
@@ -79,7 +80,7 @@ function Column({
         <h3 className="text-sm font-semibold">{STATUS_LABELS[status]}</h3>
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
-            over ? "bg-red-100 text-red-600" : "bg-muted text-muted-foreground"
+            over ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"
           }`}
         >
           {tasks.length}

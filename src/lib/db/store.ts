@@ -23,7 +23,7 @@ import type {
   Task,
 } from "@/lib/domain/types";
 import { nextDueDate } from "@/lib/domain/repeat";
-import { transition, type TaskEvent, type TransitionResult } from "@/lib/engine/stateMachine";
+import { transition, type TaskEvent } from "@/lib/engine/stateMachine";
 import { isBlocked, wouldCreateCycle } from "@/lib/engine/selectors";
 import { evaluateAutomations } from "@/lib/engine/automations";
 
@@ -58,7 +58,9 @@ function normalizeDb(raw: Partial<Db>): Db {
   return {
     ...defaults,
     ...db,
-    tasks: Array.isArray(db.tasks) ? db.tasks : [],
+    tasks: Array.isArray(db.tasks)
+      ? db.tasks.map((t) => ({ ...t, history: Array.isArray(t.history) ? t.history : [] }))
+      : [],
     projects: Array.isArray(db.projects) ? db.projects : [],
     areas: Array.isArray(db.areas) ? db.areas : [],
     tags: Array.isArray(db.tags) ? db.tags : [],
@@ -177,19 +179,62 @@ export async function updateTask(
       }
     }
 
-    const next = {
+    let next: Task = {
       ...db.tasks[idx],
       ...patch,
       id: db.tasks[idx].id,
       createdAt: db.tasks[idx].createdAt,
       updatedAt: new Date().toISOString(),
     };
+
+    // 关键字段变更写入活动历史
+    const labels: string[] = [];
+    if (patch.title !== undefined && patch.title !== db.tasks[idx].title) {
+      labels.push("修改了标题");
+    }
+    if (patch.priority !== undefined && patch.priority !== db.tasks[idx].priority) {
+      labels.push(`优先级设为 P${patch.priority}`);
+    }
+    if (patch.dueDate !== undefined && patch.dueDate !== db.tasks[idx].dueDate) {
+      labels.push(patch.dueDate ? `截止日期改为 ${patch.dueDate}` : "清除了截止日期");
+    }
+    if (patch.projectId !== undefined && patch.projectId !== db.tasks[idx].projectId) {
+      labels.push("调整了所属项目");
+    }
+    if (patch.isFrog !== undefined && patch.isFrog !== db.tasks[idx].isFrog) {
+      labels.push(patch.isFrog ? "标记为青蛙" : "取消青蛙标记");
+    }
+    if (patch.scheduledAt !== undefined && patch.scheduledAt !== db.tasks[idx].scheduledAt) {
+      labels.push(patch.scheduledAt ? `排期到 ${patch.scheduledAt.slice(0, 16)}` : "取消排期");
+    }
+    for (const label of labels) next = pushHistory(next, label);
+
     db.tasks[idx] = next;
     return { ok: true, task: next };
   });
 }
 
-export async function transitionTask(id: string, event: TaskEvent): Promise<TransitionResult> {
+const EVENT_HISTORY_LABELS: Record<TaskEvent["type"], string> = {
+  clarify: "澄清了任务",
+  start: "开始执行",
+  complete: "完成",
+  reopen: "重新打开",
+  cancel: "取消",
+  setStatus: "移动了看板列",
+  trash: "移入回收站",
+  restore: "恢复",
+};
+
+function pushHistory(task: Task, label: string): Task {
+  const entry = { at: new Date().toISOString(), label };
+  return { ...task, history: [...(task.history ?? []), entry].slice(-50) };
+}
+
+export type TransitionOutcome =
+  | { ok: true; task: Task; spawned?: Task }
+  | { ok: false; error: string };
+
+export async function transitionTask(id: string, event: TaskEvent): Promise<TransitionOutcome> {
   return mutate((db) => {
     const idx = db.tasks.findIndex((t) => t.id === id);
     if (idx < 0) return { ok: false as const, error: "任务不存在" };
@@ -202,30 +247,34 @@ export async function transitionTask(id: string, event: TaskEvent): Promise<Tran
 
     const result = transition(task, event);
     if (result.ok) {
-      db.tasks[idx] = result.task;
+      let updated = pushHistory(result.task, EVENT_HISTORY_LABELS[event.type]);
+      db.tasks[idx] = updated;
+      let spawned: Task | undefined;
 
       // 重复任务：完成后自动生成下一次
-      if (result.task.status === "done" && result.task.repeatRule) {
+      if (updated.status === "done" && updated.repeatRule) {
         const today = new Date().toISOString().slice(0, 10);
-        const baseDate = result.task.dueDate ?? today;
-        const nextDate = nextDueDate(result.task.repeatRule, baseDate) ?? baseDate;
+        const baseDate = updated.dueDate ?? today;
+        const nextDate = nextDueDate(updated.repeatRule, baseDate) ?? baseDate;
         const next = makeTask({
-          title: result.task.title,
-          notes: result.task.notes,
-          priority: result.task.priority,
-          effort: result.task.effort,
+          title: updated.title,
+          notes: updated.notes,
+          priority: updated.priority,
+          effort: updated.effort,
           dueDate: nextDate,
-          projectId: result.task.projectId,
-          areaId: result.task.areaId,
-          tags: result.task.tags,
-          contexts: result.task.contexts,
-          repeatRule: result.task.repeatRule,
+          projectId: updated.projectId,
+          areaId: updated.areaId,
+          tags: updated.tags,
+          contexts: updated.contexts,
+          repeatRule: updated.repeatRule,
           phase: "action",
           status: "todo",
         });
         next.order = db.tasks.length;
         db.tasks.push(next);
+        spawned = next;
       }
+      return { ok: true as const, task: updated, spawned };
     }
     return result;
   });

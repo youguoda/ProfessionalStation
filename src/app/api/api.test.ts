@@ -63,7 +63,7 @@ describe("API：状态机流转", () => {
       { params: Promise.resolve({ id: t.id as string }) },
     );
     expect(res.status).toBe(200);
-    expect((await res.json()).phase).toBe("action");
+    expect((await res.json()).task.phase).toBe("action");
   });
 
   it("reference 完成返回 409", async () => {

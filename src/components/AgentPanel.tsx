@@ -7,6 +7,7 @@ import { proposalLabel } from "@/lib/agent/tools";
 import type { ActionProposal, ChatMessage } from "@/lib/domain/types";
 import { AgentSettings } from "./AgentSettings";
 import { toastError } from "@/store/useToast";
+import { Markdown } from "@/lib/markdown";
 
 function ProposalCard({
   message,
@@ -106,7 +107,7 @@ function ProposalCard({
           >
             忽略
           </button>
-          {error ? <span className="text-[11px] text-red-500">{error}</span> : null}
+          {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
         </div>
       ) : null}
     </div>
@@ -178,7 +179,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
             <span className="text-lg">🤖</span>
             <span className="font-medium">{name}</span>
             {!aiStatus?.enabled ? (
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+              <span className="rounded bg-warning/20 px-1.5 py-0.5 text-[10px] text-warning">
                 未配置 Key
               </span>
             ) : null}
@@ -234,7 +235,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                             : "border bg-muted/40"
                         }`}
                       >
-                        <div className="whitespace-pre-wrap">{m.content}</div>
+                        <Markdown text={m.content} />
                         {m.proposals.length > 0 ? (
                           <div className="mt-2 space-y-1.5">
                             {m.proposals.map((p) => (
@@ -266,7 +267,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                       </div>
                     </div>
                   ) : null}
-                  {error ? <p className="text-center text-xs text-red-500">{error}</p> : null}
+                  {error ? <p className="text-center text-xs text-destructive">{error}</p> : null}
                 </>
               )}
             </div>

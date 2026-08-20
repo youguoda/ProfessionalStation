@@ -172,6 +172,20 @@ export function isBlocked(task: Task, tasks: Task[]): boolean {
   });
 }
 
+/** 一次性计算所有被阻塞任务的 id 集合（供列表容器下发，避免每个 TaskItem O(n) 扫描） */
+export function blockedIdSet(tasks: Task[]): Set<string> {
+  const active = new Set(
+    tasks
+      .filter((t) => t.phase !== "trash" && t.status !== "done" && t.status !== "canceled")
+      .map((t) => t.id),
+  );
+  const blocked = new Set<string>();
+  for (const t of tasks) {
+    if (t.blockedBy.some((id) => active.has(id))) blocked.add(t.id);
+  }
+  return blocked;
+}
+
 /** 可执行的下一步行动（排除被阻塞的） */
 export function selectReady(tasks: Task[]): Task[] {
   return tasks.filter(

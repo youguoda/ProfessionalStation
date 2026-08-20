@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createProject, createTask } from "@/lib/domain/factory";
 import type { Settings } from "@/lib/domain/types";
 import {
+  blockedIdSet,
   byFrogThenPriority,
   byOrderThenPriority,
   isBlocked,
@@ -82,6 +83,7 @@ describe("selectKanban", () => {
       autoClearFrogOnDone: true,
       staleWaitingReminder: false,
     },
+    theme: "system",
   };
 
   it("按 status 分列、按优先级排序、wip 取自 settings", () => {
@@ -236,6 +238,16 @@ describe("isBlocked / selectReady", () => {
     const blocked = createTask({ title: "blocked", phase: "action", blockedBy: [dep.id] });
     const ready = createTask({ title: "ready", phase: "action" });
     expect(selectReady([dep, blocked, ready]).map((t) => t.title)).toEqual(["dep", "ready"]);
+  });
+
+  it("blockedIdSet 一次性计算被阻塞集合", () => {
+    const dep = createTask({ title: "dep", phase: "action", status: "todo" });
+    const blocked = createTask({ title: "blocked", phase: "action", blockedBy: [dep.id] });
+    const ready = createTask({ title: "ready", phase: "action" });
+    const set = blockedIdSet([dep, blocked, ready]);
+    expect(set.has(blocked.id)).toBe(true);
+    expect(set.has(ready.id)).toBe(false);
+    expect(set.has(dep.id)).toBe(false);
   });
 });
 

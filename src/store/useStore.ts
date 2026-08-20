@@ -12,8 +12,10 @@ import type {
   Project,
   Tag,
   Task,
+  ThemeMode,
 } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
+import { applyTheme } from "@/lib/client/theme";
 
 export type ViewId =
   | "inbox"
@@ -69,6 +71,7 @@ interface AppState {
   createArea: (name: string) => Promise<Area>;
   createTag: (name: string, kind: "tag" | "context") => Promise<Tag>;
   updateSettings: (patch: Record<string, unknown>) => Promise<Db["settings"]>;
+  setTheme: (mode: ThemeMode) => Promise<void>;
   saveReview: (notes: string, checklist: Record<string, boolean>) => Promise<void>;
 
   createHabit: (name: string, icon?: string) => Promise<Habit>;
@@ -77,6 +80,11 @@ interface AppState {
   runAutomations: () => Promise<{ applied: number; notifications: string[] }>;
 
   setAgentOpen: (open: boolean) => void;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
+  selectedTaskId: string | null;
+  openTask: (id: string) => void;
+  closeTask: () => void;
   saveAgentProfile: (patch: Record<string, unknown>) => Promise<AgentProfile>;
   sendChat: (text: string) => Promise<void>;
   setChatMessages: (messages: ChatMessage[]) => void;
@@ -111,12 +119,15 @@ export const useStore = create<AppState>((set, get) => ({
     defaultMode: "gtd",
     kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
     automations: { autoFlagOverdueFrog: false, autoClearFrogOnDone: true, staleWaitingReminder: false },
+    theme: "system",
   },
   automationLog: [],
   aiStatus: null,
   agentOpen: false,
   agentProfile: null,
   chatMessages: [],
+  paletteOpen: false,
+  selectedTaskId: null,
 
   view: "today",
   search: "",
@@ -147,6 +158,7 @@ export const useStore = create<AppState>((set, get) => ({
         loaded: true,
         loading: false,
       });
+      applyTheme(db.settings.theme);
       // 自动化：有规则开启时，加载后自动运行一次
       const a = db.settings.automations;
       if (a.autoFlagOverdueFrog || a.autoClearFrogOnDone || a.staleWaitingReminder) {
@@ -169,16 +181,14 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   transition: async (id, event) => {
-    const task = await api.transition(id, event).catch((e) => {
+    const { task, spawned } = await api.transition(id, event).catch((e) => {
       const t = get().tasks.find((x) => x.id === id);
       const msg = e instanceof Error ? e.message : "操作失败";
       throw new Error(t ? `「${t.title}」：${msg}` : msg);
     });
     set({ tasks: upsert(get().tasks, task) });
-    // 重复任务完成时会在服务端生成下一次，重载同步新增实例
-    if (task.repeatRule && task.status === "done") {
-      await get().load();
-    }
+    // 重复任务完成时服务端生成的下一次直接并入，无需全量重载（消除闪屏）
+    if (spawned) set({ tasks: upsert(get().tasks, spawned) });
     return task;
   },
 
@@ -193,9 +203,21 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   deleteTask: async (id) => {
+    const prev = get().tasks.find((t) => t.id === id);
     await api.deleteTask(id);
-    // 软删除会把任务移入回收站、硬删除会移除，直接重载保证一致
-    await get().load();
+    if (!prev) return;
+    // 本地同步软删/硬删，不做全量重载
+    if (prev.phase === "trash") {
+      set({ tasks: get().tasks.filter((t) => t.id !== id) });
+    } else {
+      set({
+        tasks: upsert(get().tasks, {
+          ...prev,
+          phase: "trash",
+          updatedAt: new Date().toISOString(),
+        }),
+      });
+    }
   },
 
   createProject: async (name) => {
@@ -228,6 +250,12 @@ export const useStore = create<AppState>((set, get) => ({
     const settings = await api.updateSettings(patch);
     set({ settings });
     return settings;
+  },
+
+  setTheme: async (mode) => {
+    applyTheme(mode);
+    const settings = await api.updateSettings({ theme: mode });
+    set({ settings });
   },
 
   saveReview: async (notes, checklist) => {
@@ -270,6 +298,10 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setAgentOpen: (open) => set({ agentOpen: open }),
+
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
+  openTask: (id) => set({ selectedTaskId: id }),
+  closeTask: () => set({ selectedTaskId: null }),
 
   saveAgentProfile: async (patch) => {
     const profile = await api.saveAgentProfile(patch);

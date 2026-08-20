@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useStore } from "@/store/useStore";
 import { Sidebar } from "./Sidebar";
 import { CaptureBar } from "./CaptureBar";
@@ -16,6 +16,7 @@ import { PomodoroDock } from "./PomodoroDock";
 import { TaskDetail } from "./TaskDetail";
 import { AgentPanel } from "./AgentPanel";
 import { ToastViewport } from "./ToastViewport";
+import { CommandPalette } from "./CommandPalette";
 import { triggerUndo } from "@/store/useToast";
 
 export function App() {
@@ -25,18 +26,34 @@ export function App() {
   const error = useStore((s) => s.error);
   const agentOpen = useStore((s) => s.agentOpen);
   const setAgentOpen = useStore((s) => s.setAgentOpen);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedTaskId = useStore((s) => s.selectedTaskId);
+  const openTask = useStore((s) => s.openTask);
+  const closeTask = useStore((s) => s.closeTask);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // 全局 Cmd/Ctrl+Z 撤销最近一次操作
+  // 全局快捷键：Cmd/Ctrl+Z 撤销；Q 聚焦快速捕获（不在输入框内时）
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         triggerUndo();
+      }
+      if (e.key.toLowerCase() === "q" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const target = e.target as HTMLElement | null;
+        if (
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT" ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+        e.preventDefault();
+        document.getElementById("capture-input")?.focus();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -48,7 +65,7 @@ export function App() {
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
           <p className="text-3xl mb-3">⚠️</p>
-          <p className="text-red-500">{error}</p>
+          <p className="text-destructive">{error}</p>
           <button
             onClick={() => load()}
             className="mt-4 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
@@ -79,11 +96,11 @@ export function App() {
           {isBoard ? (
             <div>
               {view === "kanban" ? (
-                <KanbanView onSelect={setSelectedId} />
+                <KanbanView onSelect={openTask} />
               ) : view === "matrix" ? (
-                <MatrixView onSelect={setSelectedId} />
+                <MatrixView onSelect={openTask} />
               ) : (
-                <TimeBlockView onSelect={setSelectedId} />
+                <TimeBlockView onSelect={openTask} />
               )}
             </div>
           ) : (
@@ -91,24 +108,25 @@ export function App() {
               {view === "review" ? (
                 <WeeklyReviewView />
               ) : view === "para" ? (
-                <ParaView onSelect={setSelectedId} />
+                <ParaView onSelect={openTask} />
               ) : view === "habits" ? (
                 <HabitsView />
               ) : view === "automation" ? (
                 <AutomationView />
               ) : (
-                <ListView view={view} onSelect={setSelectedId} />
+                <ListView view={view} onSelect={openTask} />
               )}
             </div>
           )}
         </main>
       </div>
-      {selectedId ? (
-        <TaskDetail id={selectedId} onClose={() => setSelectedId(null)} />
+      {selectedTaskId ? (
+        <TaskDetail id={selectedTaskId} onClose={closeTask} />
       ) : null}
       {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
-      <PomodoroDock />
+      {!selectedTaskId && !agentOpen ? <PomodoroDock /> : null}
       <ToastViewport />
+      <CommandPalette />
     </div>
   );
 }
