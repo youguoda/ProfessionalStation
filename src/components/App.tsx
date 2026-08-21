@@ -5,11 +5,8 @@ import { useStore } from "@/store/useStore";
 import { Sidebar } from "./Sidebar";
 import { CaptureBar } from "./CaptureBar";
 import { ListView } from "./ListView";
-import { KanbanView } from "./KanbanView";
-import { MatrixView } from "./MatrixView";
 import { WeeklyReviewView } from "./WeeklyReviewView";
 import { ParaView } from "./ParaView";
-import { TimeBlockView } from "./TimeBlockView";
 import { HabitsView } from "./HabitsView";
 import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
@@ -20,16 +17,12 @@ import { CommandPalette } from "./CommandPalette";
 import { LogView } from "./LogView";
 import { ProjectDetailView } from "./ProjectDetailView";
 import { SettingsView } from "./SettingsView";
-import { ModeSwitcher } from "./ModeSwitcher";
 import { triggerUndo } from "@/store/useToast";
 import { checkReminders } from "@/lib/client/reminders";
-
-const LIST_SCOPES = ["inbox", "today", "upcoming", "anytime", "waiting", "someday", "trash"];
 
 export function App() {
   const load = useStore((s) => s.load);
   const scope = useStore((s) => s.scope);
-  const mode = useStore((s) => s.mode);
   const loaded = useStore((s) => s.loaded);
   const error = useStore((s) => s.error);
   const agentOpen = useStore((s) => s.agentOpen);
@@ -99,10 +92,7 @@ export function App() {
     );
   }
 
-  const isTaskScope =
-    LIST_SCOPES.includes(scope) || scope.startsWith("project:") || scope.startsWith("area:");
-  const wide = isTaskScope && mode !== "list";
-
+  // 任务范围：固定列表视图（看板/四象限/时间块模式按钮已移除）
   function MainContent() {
     if (scope === "habits") return <HabitsView />;
     if (scope === "review") return <WeeklyReviewView />;
@@ -115,21 +105,7 @@ export function App() {
     }
     if (scope.startsWith("area:")) return <ListView scope={scope} onSelect={openTask} />;
 
-    // 任务范围：视图模式作用于当前范围
-    return (
-      <div>
-        <ModeSwitcher />
-        {mode === "list" ? (
-          <ListView scope={scope} onSelect={openTask} />
-        ) : mode === "kanban" ? (
-          <KanbanView scope={scope} onSelect={openTask} />
-        ) : mode === "matrix" ? (
-          <MatrixView scope={scope} onSelect={openTask} />
-        ) : (
-          <TimeBlockView onSelect={openTask} />
-        )}
-      </div>
-    );
+    return <ListView scope={scope} onSelect={openTask} />;
   }
 
   return (
@@ -138,13 +114,9 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <CaptureBar />
         <main className="flex-1 overflow-y-auto p-6">
-          {wide ? (
+          <div className="mx-auto max-w-4xl">
             <MainContent />
-          ) : (
-            <div className="mx-auto max-w-4xl">
-              <MainContent />
-            </div>
-          )}
+          </div>
         </main>
       </div>
       {agentOpen ? <AgentPanel onClose={() => setAgentOpen(false)} /> : null}
