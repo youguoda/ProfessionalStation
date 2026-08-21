@@ -299,6 +299,42 @@ describe("selectUpcoming / selectLog / scope", () => {
     expect(needsWeeklyReview([{ date: "2024-12-31" }], now)).toBe(true);
     expect(needsWeeklyReview([{ date: "2025-01-05" }], now)).toBe(false);
   });
+
+  it("四象限作用于当前范围（scopeSource + selectMatrix）", () => {
+    const p = createProject({ name: "P" });
+    const inP = createTask({
+      title: "项目重要紧急",
+      phase: "action",
+      projectId: p.id,
+      priority: 1,
+      dueDate: "2025-01-09",
+    });
+    const out = createTask({ title: "范围外", phase: "action", priority: 1, dueDate: "2025-01-09" });
+    const m = selectMatrix(scopeSource(`project:${p.id}`, [inP, out]), now);
+    const total = m.reduce((n, q) => n + q.tasks.length, 0);
+    expect(total).toBe(1);
+    expect(m[0].tasks.map((t) => t.title)).toEqual(["项目重要紧急"]);
+  });
+
+  it("看板作用于当前范围（scopeSource + selectKanban）", () => {
+    const p = createProject({ name: "P" });
+    const settings: Settings = {
+      defaultMode: "gtd",
+      kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
+      automations: {
+        autoFlagOverdueFrog: false,
+        autoClearFrogOnDone: true,
+        staleWaitingReminder: false,
+      },
+      theme: "system",
+      dayStartHour: 8,
+      dayEndHour: 22,
+    };
+    const inP = createTask({ title: "项目任务", phase: "action", projectId: p.id });
+    const out = createTask({ title: "范围外", phase: "action" });
+    const cols = selectKanban(scopeSource(`project:${p.id}`, [inP, out]), settings);
+    expect(cols[0].tasks.map((t) => t.title)).toEqual(["项目任务"]);
+  });
 });
 
 describe("wouldCreateCycle 成环检测", () => {

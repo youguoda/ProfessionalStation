@@ -19,6 +19,8 @@ import { POST as postAiSchedule } from "./ai/schedule/route";
 import { GET as getAgentProfile, PATCH as patchAgentProfile } from "./agent/profile/route";
 import { GET as getAgentChat, POST as postAgentChat, DELETE as clearAgentChat } from "./agent/chat/route";
 import { POST as postAgentProposalStatus } from "./agent/proposals/route";
+import { GET as exportRoute } from "./export/route";
+import { GET as getReviews, PATCH as patchReviewDraft } from "./reviews/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
@@ -516,5 +518,70 @@ describe("API：马力 Agent", () => {
     expect((await (await getAgentChat()).json()).length).toBe(2);
     expect((await clearAgentChat()).status).toBe(200);
     expect((await (await getAgentChat()).json()).length).toBe(0);
+  });
+});
+
+describe("API：导出 / 周回顾草稿 / 时段设置 / durationMinutes", () => {
+  it("export json/csv/md 内容与未知格式 400", async () => {
+    await create({ title: "导出我", phase: "action" });
+
+    const json = await exportRoute(new Request("http://test/api/export?format=json"));
+    expect(json.status).toBe(200);
+    const db = await json.json();
+    expect(db.tasks.some((t: { title: string }) => t.title === "导出我")).toBe(true);
+
+    const csv = await exportRoute(new Request("http://test/api/export?format=csv"));
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-type")).toContain("text/csv");
+    expect(await csv.text()).toContain("导出我");
+
+    const md = await exportRoute(new Request("http://test/api/export?format=md"));
+    expect(md.status).toBe(200);
+    expect(await md.text()).toContain("导出我");
+
+    const bad = await exportRoute(new Request("http://test/api/export?format=xml"));
+    expect(bad.status).toBe(400);
+  });
+
+  it("reviews GET 返回草稿、PATCH 保存草稿", async () => {
+    const r1 = await getReviews();
+    expect(r1.status).toBe(200);
+    const { reviews, draft } = await r1.json();
+    expect(Array.isArray(reviews)).toBe(true);
+    expect(draft).toEqual({ checklist: {}, notes: "" });
+
+    const r2 = await patchReviewDraft(
+      jsonReq("/api/reviews", { checklist: { a: true }, notes: "复盘草稿" }, "PATCH"),
+    );
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).notes).toBe("复盘草稿");
+    const again = await (await getReviews()).json();
+    expect(again.draft.checklist).toEqual({ a: true });
+  });
+
+  it("settings PATCH 时段与非法值", async () => {
+    const ok = await patchSettings(
+      jsonReq("/api/settings", { dayStartHour: 7, dayEndHour: 21 }, "PATCH"),
+    );
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.dayStartHour).toBe(7);
+    expect(body.dayEndHour).toBe(21);
+  });
+
+  it("PATCH durationMinutes 校验边界（5 拒绝 / 90 通过）", async () => {
+    const t = await create({ title: "时长任务", phase: "action" });
+    const bad = await patchTask(
+      jsonReq(`/api/tasks/${t.id}`, { durationMinutes: 5 }, "PATCH"),
+      { params: Promise.resolve({ id: t.id as string }) },
+    );
+    expect(bad.status).toBe(400);
+
+    const good = await patchTask(
+      jsonReq(`/api/tasks/${t.id}`, { durationMinutes: 90 }, "PATCH"),
+      { params: Promise.resolve({ id: t.id as string }) },
+    );
+    expect(good.status).toBe(200);
+    expect((await good.json()).durationMinutes).toBe(90);
   });
 });

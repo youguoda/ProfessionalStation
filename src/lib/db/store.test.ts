@@ -276,5 +276,66 @@ describe("自动化运行", () => {
     expect(db.settings.automations.autoFlagOverdueFrog).toBe(false);
     expect(db.settings.automations.autoClearFrogOnDone).toBe(true);
     expect(db.settings.automations.staleWaitingReminder).toBe(false);
+    expect(db.settings.theme).toBe("system");
+    expect(db.settings.dayStartHour).toBe(8);
+    expect(db.settings.dayEndHour).toBe(22);
+    expect(db.weeklyReviewDraft).toEqual({ checklist: {}, notes: "" });
+    expect(db.chatSummary).toBe("");
+  });
+});
+
+describe("活动历史", () => {
+  it("状态迁移追加历史", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    await store.transitionTask(t.id, { type: "start" });
+    await store.transitionTask(t.id, { type: "complete" });
+    const task = await store.getTask(t.id);
+    expect(task!.history.map((h) => h.label)).toEqual(["开始执行", "完成"]);
+  });
+
+  it("关键字段更新追加历史", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    await store.updateTask(t.id, { priority: 1 });
+    await store.updateTask(t.id, { isFrog: true });
+    const task = await store.getTask(t.id);
+    expect(task!.history.map((h) => h.label)).toEqual(["优先级设为 P1", "标记为青蛙"]);
+  });
+
+  it("历史条目最多保留 50 条", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    for (let i = 0; i < 55; i++) {
+      const p = i % 2 === 0 ? 1 : 2;
+      await store.updateTask(t.id, { priority: p });
+    }
+    const task = await store.getTask(t.id);
+    expect(task!.history).toHaveLength(50);
+  });
+});
+
+describe("周回顾草稿", () => {
+  it("草稿读写一致", async () => {
+    await store.setWeeklyReviewDraft({ checklist: { a: true }, notes: "复盘" });
+    const draft = await store.getWeeklyReviewDraft();
+    expect(draft).toEqual({ checklist: { a: true }, notes: "复盘" });
+  });
+
+  it("完成回顾后草稿清空", async () => {
+    await store.setWeeklyReviewDraft({ checklist: { a: true }, notes: "复盘" });
+    await store.createWeeklyReview({ notes: "复盘", checklist: { a: true } });
+    expect(await store.getWeeklyReviewDraft()).toEqual({ checklist: {}, notes: "" });
+  });
+});
+
+describe("durationMinutes 模型", () => {
+  it("默认 30 分钟", async () => {
+    const t = await store.createTask({ title: "x" });
+    expect(t.durationMinutes).toBe(30);
+  });
+
+  it("可通过 updateTask 调整", async () => {
+    const t = await store.createTask({ title: "x" });
+    const r = await store.updateTask(t.id, { durationMinutes: 90 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.durationMinutes).toBe(90);
   });
 });
