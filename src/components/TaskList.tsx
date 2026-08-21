@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { blockedIdSet } from "@/lib/engine/selectors";
 import { useTaskMeta } from "@/lib/client/useTaskMeta";
@@ -15,6 +15,7 @@ export function TaskList({
   emptyText,
   showFrog = false,
   groupBy,
+  renderItem,
 }: {
   title: string;
   tasks: Task[];
@@ -22,6 +23,7 @@ export function TaskList({
   emptyText: string;
   showFrog?: boolean;
   groupBy?: (task: Task) => string;
+  renderItem?: (task: Task) => React.ReactNode;
 }) {
   const meta = useTaskMeta();
   const allTasks = useStore((s) => s.tasks);
@@ -99,11 +101,8 @@ export function TaskList({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, onSelect, transition, updateTask]);
 
-  const renderItem = (t: Task) => (
-    <div
-      key={t.id}
-      className={selectedId === t.id ? "rounded-lg ring-1 ring-primary/50" : ""}
-    >
+  const defaultRenderItem = (t: Task) => (
+    <div className={selectedId === t.id ? "rounded-lg ring-1 ring-primary/50" : ""}>
       <TaskItem
         task={t}
         meta={meta}
@@ -112,6 +111,10 @@ export function TaskList({
         showFrog={showFrog}
       />
     </div>
+  );
+
+  const renderRow = (t: Task) => (
+    <Fragment key={t.id}>{renderItem ? renderItem(t) : defaultRenderItem(t)}</Fragment>
   );
 
   if (tasks.length === 0 && fxTasks.length === 0) {
@@ -126,8 +129,8 @@ export function TaskList({
   if (!groupBy) {
     return (
       <div className="space-y-1.5">
-        {tasks.map(renderItem)}
-        {fxTasks.map(renderItem)}
+        {tasks.map(renderRow)}
+        {fxTasks.map(renderRow)}
       </div>
     );
   }
@@ -146,11 +149,11 @@ export function TaskList({
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {key}
           </h3>
-          <div className="space-y-1.5">{list.map(renderItem)}</div>
+          <div className="space-y-1.5">{list.map(renderRow)}</div>
         </section>
       ))}
       {fxTasks.length > 0 ? (
-        <div className="space-y-1.5">{fxTasks.map(renderItem)}</div>
+        <div className="space-y-1.5">{fxTasks.map(renderRow)}</div>
       ) : null}
     </div>
   );

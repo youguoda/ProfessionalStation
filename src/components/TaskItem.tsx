@@ -174,24 +174,6 @@ export function TaskItem({
             </button>
           ) : null}
 
-          {task.phase === "inbox" ? (
-            <select
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => {
-                const target = e.target.value as "action" | "waiting" | "someday" | "reference";
-                transition(task.id, { type: "clarify", target }).catch((err) => toastError(err));
-              }}
-              defaultValue=""
-              className="rounded border bg-background px-1 py-0.5 text-xs"
-            >
-              <option value="" disabled>澄清…</option>
-              <option value="action">→ 行动</option>
-              <option value="waiting">→ 等待</option>
-              <option value="someday">→ 将来</option>
-              <option value="reference">→ 参考</option>
-            </select>
-          ) : null}
-
           {task.phase === "action" && task.status === "todo" ? (
             <button
               onClick={(e) => run(e, () => transition(task.id, { type: "start" }))}

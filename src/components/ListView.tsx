@@ -11,6 +11,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import { BookOpen, Hourglass, Sparkles, Zap } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import {
   needsWeeklyReview,
@@ -23,6 +24,8 @@ import {
   selectWaiting,
   tasksForScope,
 } from "@/lib/engine/selectors";
+import { CLARIFY_BUCKETS, clarifyTargetFromDrop } from "@/lib/engine/clarifyDrop";
+import type { ClarifyTarget } from "@/lib/engine/stateMachine";
 import { formatRelativeDate } from "@/lib/parsing/dateFormat";
 import { toastError } from "@/store/useToast";
 import type { ScopeId, Task } from "@/lib/domain/types";
@@ -76,11 +79,39 @@ function DraggableRow({ task, children }: { task: Task; children: React.ReactNod
   );
 }
 
+const CLARIFY_ICONS: Record<ClarifyTarget, typeof Zap> = {
+  action: Zap,
+  waiting: Hourglass,
+  someday: Sparkles,
+  reference: BookOpen,
+};
+
+function ClarifyBucket({ target }: { target: ClarifyTarget }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `clarify-${target}`, data: { clarify: target } });
+  const meta = CLARIFY_BUCKETS.find((b) => b.target === target)!;
+  const Icon = CLARIFY_ICONS[target];
+  return (
+    <div
+      ref={setNodeRef}
+      title={meta.hint}
+      className={`flex items-center gap-2 rounded-xl border-2 border-dashed px-3 py-2.5 text-sm transition-colors ${
+        isOver
+          ? "border-primary bg-primary/10 text-primary"
+          : "border-muted-foreground/25 bg-muted/30 text-muted-foreground"
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="truncate">{meta.label}</span>
+    </div>
+  );
+}
+
 export function ListView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: string) => void }) {
   const tasks = useStore((s) => s.tasks);
   const search = useStore((s) => s.search);
   const setSearch = useStore((s) => s.setSearch);
   const updateTask = useStore((s) => s.updateTask);
+  const transition = useStore((s) => s.transition);
   const areas = useStore((s) => s.areas);
   const weeklyReviews = useStore((s) => s.weeklyReviews);
   const setScope = useStore((s) => s.setScope);
@@ -125,6 +156,16 @@ export function ListView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: s
     }
   };
 
+  // 收件箱拖拽澄清：落点必须命中澄清桶，且拖动的必须是当前列表内的任务
+  const handleClarifyDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over) return;
+    const target = clarifyTargetFromDrop(over.data.current?.clarify);
+    if (!target) return;
+    if (!list.some((t) => t.id === String(active.id))) return;
+    transition(String(active.id), { type: "clarify", target }).catch((err) => toastError(err));
+  };
+
   const renderItem = (t: Task) => (
     <TaskItem
       task={t}
@@ -167,7 +208,29 @@ export function ListView({ scope, onSelect }: { scope: ScopeId; onSelect: (id: s
         </button>
       ) : null}
 
-      {scope === "upcoming" ? (
+      {scope === "inbox" ? (
+        <DndContext sensors={sensors} onDragEnd={handleClarifyDragEnd}>
+          {list.length > 0 ? (
+            <div className="mb-4">
+              <p className="mb-2 text-xs text-muted-foreground">
+                拖拽任务卡片到对应桶完成澄清
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {CLARIFY_BUCKETS.map((b) => (
+                  <ClarifyBucket key={b.target} target={b.target} />
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <TaskList
+            title={title}
+            tasks={list}
+            onSelect={onSelect}
+            emptyText={empty}
+            renderItem={(t) => <DraggableRow task={t}>{renderItem(t)}</DraggableRow>}
+          />
+        </DndContext>
+      ) : scope === "upcoming" ? (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           {(() => {
             const groups = new Map<string, Task[]>();
