@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAgentProfile } from "@/lib/domain/factory";
-import { runAgentTurn, streamAgentReply } from "./loop";
+import { runAgentTurn, sanitizeNudge, streamAgentReply } from "./loop";
 
 function mockFetch(content: string) {
   vi.stubGlobal(
@@ -150,5 +150,46 @@ describe("streamAgentReply 流式回复", () => {
     const r = await streamAgentReply({ ...base, summary: "", userText: "x" }, () => {});
     expect(r.reply).toBe("好的");
     expect(r.proposals).toEqual([]);
+  });
+});
+
+describe("sanitizeNudge：一句话就是一句话", () => {
+  it("压掉换行与多余空白", () => {
+    expect(sanitizeNudge("今天排了 9 条。\n一件没动。")).toBe("今天排了 9 条。 一件没动。");
+  });
+
+  it("剥掉包裹的引号与角色前缀", () => {
+    expect(sanitizeNudge('「你在逗我吧？」')).toBe("你在逗我吧？");
+    expect(sanitizeNudge("马力：你在逗我吧？")).toBe("你在逗我吧？");
+  });
+
+  it("去掉代码块", () => {
+    expect(sanitizeNudge("说人话```json\n{}\n```")).toBe("说人话");
+  });
+
+  it("超长时在句号处截断", () => {
+    const long = "第一句很短。" + "啰嗦".repeat(60);
+    const out = sanitizeNudge(long, 40)!;
+    expect(out.length).toBeLessThanOrEqual(41);
+  });
+
+  it("没有句号可断时补省略号", () => {
+    const out = sanitizeNudge("啰".repeat(100), 20)!;
+    expect(out).toHaveLength(21);
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("防御：模型把一句话包进 JSON 时自动拆出来", () => {
+    expect(sanitizeNudge('{"reply": "你是准备给它办个满月酒？"}')).toBe("你是准备给它办个满月酒？");
+    expect(sanitizeNudge('{"text": "21 天了。"}')).toBe("21 天了。");
+  });
+
+  it("看起来像 JSON 但不是合法 JSON 时按原样处理", () => {
+    expect(sanitizeNudge("{今天排了 9 条")).toBe("{今天排了 9 条");
+  });
+
+  it("空内容返回 null（交给兜底文案）", () => {
+    expect(sanitizeNudge("   ")).toBeNull();
+    expect(sanitizeNudge("```json\n{}\n```")).toBeNull();
   });
 });

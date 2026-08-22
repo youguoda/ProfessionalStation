@@ -2,15 +2,16 @@ import type {
   AgentProfile,
   Area,
   ChatMessage,
+  CoachNudge,
   Db,
   Habit,
+  Note,
   Project,
   Tag,
   Task,
 } from "@/lib/domain/types";
 import { readSse } from "./stream";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
-import type { SlotSuggestion } from "@/lib/engine/scheduler";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -19,7 +20,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `请求失败（${res.status}）`);
+    throw new Error(typeof body.error === "string" ? body.error : `请求失败（${res.status}）`);
   }
   return res.json() as Promise<T>;
 }
@@ -42,6 +43,25 @@ export const api = {
       body: JSON.stringify(event),
     }),
 
+  /** 等待项「戳一下」：重置等待计时 */
+  nudgeTask: (id: string) =>
+    request<Task>(`/api/tasks/${id}/nudge`, { method: "POST" }),
+
+  /** 转化为笔记（终局之一） */
+  taskToNote: (id: string) =>
+    request<{ note: Note; task: Task }>(`/api/tasks/${id}/to-note`, { method: "POST" }),
+
+  listNotes: () => request<Note[]>("/api/notes"),
+
+  createNote: (input: Record<string, unknown>) =>
+    request<Note>("/api/notes", { method: "POST", body: JSON.stringify(input) }),
+
+  updateNote: (id: string, patch: Record<string, unknown>) =>
+    request<Note>(`/api/notes/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  deleteNote: (id: string) =>
+    request<{ ok: boolean }>(`/api/notes/${id}`, { method: "DELETE" }),
+
   createProject: (name: string) =>
     request<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),
 
@@ -54,8 +74,8 @@ export const api = {
   createArea: (name: string) =>
     request<Area>("/api/areas", { method: "POST", body: JSON.stringify({ name }) }),
 
-  createTag: (name: string, kind: "tag" | "context" = "tag") =>
-    request<Tag>("/api/tags", { method: "POST", body: JSON.stringify({ name, kind }) }),
+  createTag: (name: string) =>
+    request<Tag>("/api/tags", { method: "POST", body: JSON.stringify({ name }) }),
 
   createReview: (notes: string, checklist: Record<string, boolean>) =>
     request<Db["weeklyReviews"][number]>("/api/reviews", {
@@ -89,6 +109,13 @@ export const api = {
       method: "POST",
     }),
 
+  /** 清空任务与笔记（保留项目/领域/设置/人格） */
+  resetData: () =>
+    request<{ tasks: number; notes: number }>("/api/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "RESET" }),
+    }),
+
   aiStatus: () =>
     request<{ enabled: boolean; model: string; baseUrl: string | null }>("/api/ai/status"),
 
@@ -98,9 +125,13 @@ export const api = {
       body: JSON.stringify({ title, notes }),
     }),
 
-  aiSchedule: () =>
-    request<{ suggestions: SlotSuggestion[]; source: "ai" | "heuristic" }>("/api/ai/schedule", {
+  /** 教练层：取今天该说的那一句（大多数日子是 null） */
+  coachNudge: () => request<{ nudge: CoachNudge | null }>("/api/agent/nudge"),
+
+  dismissNudge: (id: string) =>
+    request<{ nudge: CoachNudge | null }>("/api/agent/nudge", {
       method: "POST",
+      body: JSON.stringify({ id }),
     }),
 
   agentProfile: () => request<AgentProfile>("/api/agent/profile"),

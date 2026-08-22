@@ -1,15 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTask } from "@/lib/domain/factory";
-import {
-  aiBreakdown,
-  aiSchedule,
-  getAiConfig,
-  parseJsonLoose,
-  streamChat,
-  validateAiSchedule,
-} from "./planner";
-
-const monday = new Date(2025, 0, 6);
+import { aiBreakdown, chatWithMessages, getAiConfig, parseJsonLoose, streamChat } from "./planner";
 
 function mockFetch(content: string) {
   vi.stubGlobal(
@@ -69,73 +59,6 @@ describe("parseJsonLoose", () => {
   });
 });
 
-describe("validateAiSchedule 校验", () => {
-  const candidates = [
-    createTask({ title: "a", phase: "action" }),
-    createTask({ title: "b", phase: "action" }),
-  ];
-  const days = ["2025-01-06", "2025-01-07"];
-  const hours = [9, 10];
-
-  it("合法建议保留", () => {
-    const r = validateAiSchedule(
-      [{ taskId: candidates[0].id, date: "2025-01-06", hour: 9 }],
-      candidates,
-      days,
-      hours,
-      3,
-    );
-    expect(r).toEqual([{ taskId: candidates[0].id, scheduledAt: "2025-01-06T09:00:00" }]);
-  });
-
-  it("非法 taskId / date / hour 被丢弃", () => {
-    const r = validateAiSchedule(
-      [
-        { taskId: "missing", date: "2025-01-06", hour: 9 },
-        { taskId: candidates[0].id, date: "2025-01-13", hour: 9 },
-        { taskId: candidates[0].id, date: "2025-01-06", hour: 23 },
-      ],
-      candidates,
-      days,
-      hours,
-      3,
-    );
-    expect(r).toEqual([]);
-  });
-
-  it("同一天超过 maxPerDay 被丢弃", () => {
-    const c3 = createTask({ title: "c", phase: "action" });
-    const all = [candidates[0], candidates[1], c3];
-    const r = validateAiSchedule(
-      [
-        { taskId: all[0].id, date: "2025-01-06", hour: 9 },
-        { taskId: all[1].id, date: "2025-01-06", hour: 10 },
-        { taskId: all[2].id, date: "2025-01-06", hour: 9 },
-      ],
-      all,
-      days,
-      hours,
-      2,
-    );
-    expect(r).toHaveLength(2);
-  });
-
-  it("重复 taskId 只保留第一条", () => {
-    const r = validateAiSchedule(
-      [
-        { taskId: candidates[0].id, date: "2025-01-06", hour: 9 },
-        { taskId: candidates[0].id, date: "2025-01-07", hour: 9 },
-      ],
-      candidates,
-      days,
-      hours,
-      3,
-    );
-    expect(r).toHaveLength(1);
-    expect(r[0].scheduledAt).toBe("2025-01-06T09:00:00");
-  });
-});
-
 describe("aiBreakdown（mock fetch）", () => {
   it("未配置 key 抛错", async () => {
     await expect(aiBreakdown("写周报", "")).rejects.toThrow("未配置 AI_API_KEY");
@@ -151,42 +74,6 @@ describe("aiBreakdown（mock fetch）", () => {
     process.env.AI_API_KEY = "sk-test";
     mockFetch("抱歉，我无法处理。");
     await expect(aiBreakdown("写周报", "")).rejects.toThrow("AI 未返回有效的子任务清单");
-  });
-});
-
-describe("aiSchedule（mock fetch / 降级）", () => {
-  it("未配置 key 降级到启发式", async () => {
-    const t = createTask({ title: "x", phase: "action" });
-    const r = await aiSchedule([t], monday);
-    expect(r.source).toBe("heuristic");
-    expect(r.suggestions).toHaveLength(1);
-  });
-
-  it("配置 key 且返回合法建议 → source=ai", async () => {
-    process.env.AI_API_KEY = "sk-test";
-    const t = createTask({ title: "x", phase: "action" });
-    mockFetch(JSON.stringify({ suggestions: [{ taskId: t.id, date: "2025-01-06", hour: 9 }] }));
-    const r = await aiSchedule([t], monday);
-    expect(r.source).toBe("ai");
-    expect(r.suggestions).toEqual([{ taskId: t.id, scheduledAt: "2025-01-06T09:00:00" }]);
-  });
-
-  it("AI 返回非法建议 → 降级启发式", async () => {
-    process.env.AI_API_KEY = "sk-test";
-    const t = createTask({ title: "x", phase: "action" });
-    mockFetch(JSON.stringify({ suggestions: [{ taskId: "bad", date: "2030-01-01", hour: 99 }] }));
-    const r = await aiSchedule([t], monday);
-    expect(r.source).toBe("heuristic");
-    expect(r.suggestions).toHaveLength(1);
-  });
-
-  it("AI 请求失败 → 降级启发式", async () => {
-    process.env.AI_API_KEY = "sk-test";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
-    const t = createTask({ title: "x", phase: "action" });
-    const r = await aiSchedule([t], monday);
-    expect(r.source).toBe("heuristic");
-    expect(r.suggestions).toHaveLength(1);
   });
 });
 
@@ -219,5 +106,41 @@ describe("streamChat 流式解析", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
     const gen = streamChat([{ role: "user", content: "x" }], "sys");
     await expect(gen.next()).rejects.toThrow("HTTP 500");
+  });
+});
+
+describe("chatWithMessages 的输出格式开关", () => {
+  /** 捕获实际发出的请求体 */
+  function captureFetch(content = "ok") {
+    const spy = vi.fn(async (_url: string, init?: RequestInit) =>
+      new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  }
+
+  function bodyOf(spy: ReturnType<typeof captureFetch>): Record<string, unknown> {
+    return JSON.parse(String(spy.mock.calls[0]?.[1]?.body ?? "{}"));
+  }
+
+  beforeEach(() => {
+    process.env.AI_API_KEY = "sk-test";
+  });
+
+  it("默认 json 模式带 response_format（结构化路径依赖它）", async () => {
+    const spy = captureFetch('{"a":1}');
+    await chatWithMessages([{ role: "user", content: "x" }], "sys");
+    expect(bodyOf(spy).response_format).toEqual({ type: "json_object" });
+  });
+
+  it("text 模式不带 response_format——否则模型会把一句话包进 JSON，且部分服务会 400", async () => {
+    const spy = captureFetch("一句话");
+    const out = await chatWithMessages([{ role: "user", content: "x" }], "sys", 0.9, "text");
+    expect(bodyOf(spy).response_format).toBeUndefined();
+    expect(bodyOf(spy).temperature).toBe(0.9);
+    expect(out).toBe("一句话");
   });
 });

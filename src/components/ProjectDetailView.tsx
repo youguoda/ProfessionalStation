@@ -1,10 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
 import { Archive } from "lucide-react";
 import { useStore } from "@/store/useStore";
-import { blockedIdSet, tasksForScope } from "@/lib/engine/selectors";
-import { useTaskMeta } from "@/lib/client/useTaskMeta";
+import { tasksForScope } from "@/lib/engine/selectors";
 import { toastError } from "@/store/useToast";
 import { TaskList, PageHeader } from "./TaskList";
 
@@ -45,8 +43,6 @@ export function ProjectDetailView({
   const tasks = useStore((s) => s.tasks);
   const updateProject = useStore((s) => s.updateProject);
   const setScope = useStore((s) => s.setScope);
-  const meta = useTaskMeta();
-  const blockedIds = useMemo(() => blockedIdSet(tasks), [tasks]);
 
   const project = projects.find((p) => p.id === projectId);
   if (!project) {
@@ -68,7 +64,7 @@ export function ProjectDetailView({
           <button
             onClick={() =>
               updateProject(project.id, { archived: true })
-                .then(() => setScope("para"))
+                .then(() => setScope("anytime"))
                 .catch((e) => toastError(e))
             }
             className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
@@ -119,12 +115,12 @@ export function ProjectDetailView({
       </div>
 
       <TaskList
-        title="进行中"
         tasks={open}
         onSelect={onSelect}
         emptyText="这个项目没有待办任务"
+        emptyHint="一个没有下一步行动的项目，在周回顾里会被标出来。给它加一条吧。"
+        showPlan
       />
-      {blockedIds.size > 0 ? null : null}
     </div>
   );
 }

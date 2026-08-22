@@ -1,4 +1,6 @@
-import type { AgentProfile, Area, Db, Habit, Project, Settings, Task, Tag } from "./types";
+import type { AgentProfile, Area, Db, Habit, Note, Project, Tag, Task } from "./types";
+import { DEFAULT_MAX_DOING, DEFAULT_MAX_TODAY, DEFAULT_STALE_DAYS } from "./constants";
+
 export function uid(): string {
   // 浏览器与 Node 18+ 均可用
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -17,15 +19,13 @@ export interface NewTaskInput {
   priority?: Task["priority"];
   effort?: number | null;
   dueDate?: string | null;
+  plannedFor?: string | null;
   startDate?: string | null;
   scheduledAt?: string | null;
-  durationMinutes?: number;
   projectId?: string | null;
   areaId?: string | null;
   parentId?: string | null;
   tags?: string[];
-  contexts?: string[];
-  isFrog?: boolean;
   phase?: Task["phase"];
   status?: Task["status"];
   completedAt?: string | null;
@@ -42,25 +42,46 @@ export function createTask(input: NewTaskInput): Task {
     title: input.title.trim(),
     notes: input.notes ?? "",
     phase,
-    status: input.status ?? (phase === "action" ? "todo" : "todo"),
+    status: input.status ?? "todo",
     priority: input.priority ?? 3,
     effort: input.effort ?? null,
     dueDate: input.dueDate ?? null,
+    plannedFor: input.plannedFor ?? null,
     startDate: input.startDate ?? null,
     scheduledAt: input.scheduledAt ?? null,
-    durationMinutes: input.durationMinutes ?? 30,
+    startedAt: null,
     completedAt: input.completedAt ?? null,
+    canceledReason: null,
     projectId: input.projectId ?? null,
     areaId: input.areaId ?? null,
     parentId: input.parentId ?? null,
     blockedBy: input.blockedBy ?? [],
     repeatRule: input.repeatRule ?? null,
     waitingFor: input.waitingFor ?? null,
+    nudgedAt: null,
     order: 0,
     tags: input.tags ?? [],
-    contexts: input.contexts ?? [],
-    isFrog: input.isFrog ?? false,
     history: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export interface NewNoteInput {
+  content: string;
+  tags?: string[];
+  projectId?: string | null;
+  taskId?: string | null;
+}
+
+export function createNote(input: NewNoteInput): Note {
+  const now = nowIso();
+  return {
+    id: uid(),
+    content: input.content,
+    tags: input.tags ?? [],
+    projectId: input.projectId ?? null,
+    taskId: input.taskId ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -73,7 +94,6 @@ export function createProject(input: Partial<Project> & { name: string }): Proje
     name: input.name.trim(),
     goal: input.goal ?? null,
     deadline: input.deadline ?? null,
-    mode: input.mode ?? "gtd",
     archived: input.archived ?? false,
     createdAt: now,
     updatedAt: now,
@@ -93,12 +113,11 @@ export function createArea(input: Partial<Area> & { name: string }): Area {
   };
 }
 
-export function createTag(name: string, kind: Tag["kind"] = "tag"): Tag {
+export function createTag(name: string): Tag {
   const now = nowIso();
   return {
     id: uid(),
     name: name.trim(),
-    kind,
     createdAt: now,
     updatedAt: now,
   };
@@ -113,19 +132,34 @@ export function createHabit(name: string, icon: string = "🎯"): Habit {
   };
 }
 
-/** 马力默认人格（战友模板） */
+/** 马力默认人格（损友模板：毒舌教练） */
 export function defaultAgentProfile(): AgentProfile {
   return {
     name: "马力",
-    personaId: "comrade",
+    personaId: "roaster",
     custom: { role: [], tone: [], style: [], boundaries: [] },
     updatedAt: nowIso(),
+  };
+}
+
+export function defaultSettings(): Db["settings"] {
+  return {
+    automations: {
+      autoClearPlanOnDone: true,
+      staleWaitingReminder: false,
+    },
+    theme: "system",
+    maxToday: DEFAULT_MAX_TODAY,
+    maxDoing: DEFAULT_MAX_DOING,
+    staleDays: DEFAULT_STALE_DAYS,
+    coachEnabled: true,
   };
 }
 
 export function emptyDb(): Db {
   return {
     tasks: [],
+    notes: [],
     projects: [],
     areas: [],
     tags: [],
@@ -133,21 +167,11 @@ export function emptyDb(): Db {
     habitChecks: [],
     weeklyReviews: [],
     weeklyReviewDraft: { checklist: {}, notes: "" },
-    settings: {
-      defaultMode: "gtd",
-      kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
-      automations: {
-        autoFlagOverdueFrog: false,
-        autoClearFrogOnDone: true,
-        staleWaitingReminder: false,
-      },
-      theme: "system",
-      dayStartHour: 8,
-      dayEndHour: 22,
-    },
+    settings: defaultSettings(),
     agentProfile: defaultAgentProfile(),
     chatMessages: [],
     memoryNotes: [],
     chatSummary: "",
+    lastNudge: null,
   };
 }

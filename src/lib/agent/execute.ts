@@ -28,8 +28,10 @@ export async function executeProposalTool(
     }
     case "set_priority":
       return store.updateTask(String(args.taskId), { priority: Number(args.priority) });
-    case "mark_frog":
-      return store.updateTask(String(args.taskId), { isFrog: Boolean(args.isFrog) });
+    case "plan_today":
+      return store.updateTask(String(args.taskId), {
+        plannedFor: args.day === null ? null : String(args.day),
+      });
     case "add_note": {
       const task = store.tasks.find((t) => t.id === args.taskId);
       const note = String(args.note);

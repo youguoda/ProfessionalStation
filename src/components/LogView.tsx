@@ -24,10 +24,11 @@ export function LogView({ onSelect }: { onSelect: (id: string) => void }) {
 
   return (
     <div>
-      <PageHeader title="已完成日志" subtitle="按完成时间倒序，成就感的唯一来源" />
+      <PageHeader title="已完成日志" subtitle="按完成时间倒序。完成与取消都是终局——两种都记在这里。" />
       {done.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <p className="text-sm">还没有完成过任务，去「今天」完成第一只青蛙吧 🐸</p>
+          <p className="text-sm">还没有结束过任何任务</p>
+          <p className="mt-1 text-xs">去「今天」承诺一条，做完它。完成是这套系统里唯一的正反馈。</p>
         </div>
       ) : (
         <div className="space-y-6">

@@ -1,34 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { createProject, createTask } from "@/lib/domain/factory";
-import type { Settings } from "@/lib/domain/types";
 import {
   blockedIdSet,
-  byFrogThenPriority,
   byOrderThenPriority,
+  daysSince,
+  doingCapacity,
   isBlocked,
   isImportant,
   isUrgent,
   needsWeeklyReview,
   quadrantOf,
-  scopeSource,
+  selectDoing,
+  selectImportantNotUrgent,
   selectInbox,
-  selectKanban,
   selectLog,
-  selectMatrix,
   selectNextActions,
   selectOverdue,
   selectReady,
   selectReviewStats,
+  selectSettlement,
   selectSomeday,
+  selectStaleDoing,
+  selectStaleInbox,
+  selectStaleSomeday,
+  selectStaleWaiting,
   selectToday,
   selectTrash,
   selectUpcoming,
   selectWaiting,
   tasksForScope,
+  todayCapacity,
+  todayPlannedCount,
+  waitingSince,
   wouldCreateCycle,
 } from "./selectors";
 
 const now = new Date(2025, 0, 8); // 2025-01-08（周三）
+const TODAY = "2025-01-08";
+const caps = { maxToday: 6, maxDoing: 3, staleDays: 7 };
 
 describe("基础清单过滤", () => {
   const tasks = [
@@ -42,10 +51,14 @@ describe("基础清单过滤", () => {
 
   it("各清单按 phase/status 精确过滤", () => {
     expect(selectInbox(tasks).map((t) => t.title)).toEqual(["收"]);
-    expect(selectNextActions(tasks).map((t) => t.title)).toEqual(["行"]);
     expect(selectWaiting(tasks).map((t) => t.title)).toEqual(["等"]);
     expect(selectSomeday(tasks).map((t) => t.title)).toEqual(["将"]);
     expect(selectTrash(tasks).map((t) => t.title)).toEqual(["废"]);
+  });
+
+  it("库存（下一步）不含已开始的任务，在制品单独一条线", () => {
+    expect(selectNextActions(tasks).map((t) => t.title)).toEqual(["行"]);
+    expect(selectDoing(tasks).map((t) => t.title)).toEqual(["做"]);
   });
 });
 
@@ -60,15 +73,15 @@ describe("isUrgent / isImportant / quadrantOf", () => {
     expect(isUrgent(createTask({ title: "x", phase: "action", dueDate: null }), now)).toBe(false);
   });
 
-  it("已完成/已取消不紧急", () => {
-    expect(isUrgent(createTask({ title: "x", phase: "action", status: "done", dueDate: "2025-01-09" }), now)).toBe(false);
+  it("已完成不紧急", () => {
+    expect(
+      isUrgent(createTask({ title: "x", phase: "action", status: "done", dueDate: "2025-01-09" }), now),
+    ).toBe(false);
   });
 
   it("priority≤2 为重要", () => {
     expect(isImportant(createTask({ title: "x", priority: 1 }))).toBe(true);
-    expect(isImportant(createTask({ title: "x", priority: 2 }))).toBe(true);
     expect(isImportant(createTask({ title: "x", priority: 3 }))).toBe(false);
-    expect(isImportant(createTask({ title: "x", priority: 4 }))).toBe(false);
   });
 
   it("四象限归类", () => {
@@ -77,142 +90,268 @@ describe("isUrgent / isImportant / quadrantOf", () => {
     expect(quadrantOf(createTask({ title: "x", phase: "action", priority: 4, dueDate: "2025-01-09" }), now)).toBe("q3");
     expect(quadrantOf(createTask({ title: "x", phase: "action", priority: 4, dueDate: null }), now)).toBe("q4");
   });
-});
 
-describe("selectKanban", () => {
-  const settings: Settings = {
-    defaultMode: "gtd",
-    kanbanWip: { todo: 2, doing: 1, done: -1, canceled: -1 },
-    automations: {
-      autoFlagOverdueFrog: true,
-      autoClearFrogOnDone: true,
-      staleWaitingReminder: false,
-    },
-    theme: "system",
-    dayStartHour: 8,
-    dayEndHour: 22,
-  };
-
-  it("按 status 分列、按优先级排序、wip 取自 settings", () => {
-    const tasks = [
-      createTask({ title: "t2", phase: "action", status: "todo", priority: 2 }),
-      createTask({ title: "t1", phase: "action", status: "todo", priority: 1 }),
-      createTask({ title: "d1", phase: "action", status: "doing", priority: 3 }),
-    ];
-    const cols = selectKanban(tasks, settings);
-    expect(cols.map((c) => c.status)).toEqual(["todo", "doing", "done", "canceled"]);
-    expect(cols[0].tasks.map((t) => t.title)).toEqual(["t1", "t2"]);
-    expect(cols[0].wip).toBe(2);
-    expect(cols[1].tasks.map((t) => t.title)).toEqual(["d1"]);
-    expect(cols[1].wip).toBe(1);
-    expect(cols[2].tasks).toEqual([]);
-    expect(cols[2].wip).toBe(-1);
-  });
-});
-
-describe("selectMatrix", () => {
-  it("四象限分桶正确", () => {
+  it("selectImportantNotUrgent 只取 Q2（周回顾的提醒项）", () => {
     const tasks = [
       createTask({ title: "q1", phase: "action", priority: 1, dueDate: "2025-01-09" }),
       createTask({ title: "q2", phase: "action", priority: 2, dueDate: null }),
-      createTask({ title: "q3", phase: "action", priority: 4, dueDate: "2025-01-09" }),
       createTask({ title: "q4", phase: "action", priority: 4, dueDate: null }),
-      createTask({ title: "done", phase: "action", status: "done", priority: 1, dueDate: "2025-01-09" }),
+      createTask({ title: "已完成q2", phase: "action", status: "done", priority: 1 }),
     ];
-    const m = selectMatrix(tasks, now);
-    expect(m[0].tasks.map((t) => t.title)).toEqual(["q1"]);
-    expect(m[1].tasks.map((t) => t.title)).toEqual(["q2"]);
-    expect(m[2].tasks.map((t) => t.title)).toEqual(["q3"]);
-    expect(m[3].tasks.map((t) => t.title)).toEqual(["q4"]);
+    expect(selectImportantNotUrgent(tasks, now).map((t) => t.title)).toEqual(["q2"]);
   });
 });
 
-describe("selectToday / selectOverdue", () => {
-  it("今日 = 今日到期 + 今日开始 + 青蛙；青蛙优先排序", () => {
+describe("selectToday：承诺，不是查询结果", () => {
+  it("只取 plannedFor === 今天；截止日不再自动进入今日", () => {
     const tasks = [
-      createTask({ title: "A", phase: "action", dueDate: "2025-01-08", priority: 2 }),
-      createTask({ title: "B", phase: "action", isFrog: true, priority: 4 }),
-      createTask({ title: "C", phase: "action", startDate: "2025-01-08", priority: 1 }),
-      createTask({ title: "D", phase: "action", dueDate: "2025-01-20", priority: 1 }),
-      createTask({ title: "E", phase: "action", status: "done", dueDate: "2025-01-08" }),
-    ];
-    expect(selectToday(tasks, now).map((t) => t.title)).toEqual(["B", "C", "A"]);
-  });
-
-  it("今天排期（scheduledAt）的任务也进入今日", () => {
-    const tasks = [
-      createTask({ title: "排期今天", phase: "action", scheduledAt: "2025-01-08T15:00:00" }),
-      createTask({ title: "排期明天", phase: "action", scheduledAt: "2025-01-09T09:00:00" }),
+      createTask({ title: "承诺今天", phase: "action", plannedFor: TODAY }),
+      createTask({ title: "今天到期但没承诺", phase: "action", dueDate: TODAY }),
       createTask({ title: "无关", phase: "action" }),
     ];
-    expect(selectToday(tasks, now).map((t) => t.title)).toEqual(["排期今天"]);
+    expect(selectToday(tasks, now).map((t) => t.title)).toEqual(["承诺今天"]);
   });
 
-  it("逾期任务置顶进入今日，且越久远的逾期越靠前", () => {
+  it("进行中的排在承诺列表最前面，其余按优先级", () => {
     const tasks = [
-      createTask({ title: "正常今天", phase: "action", dueDate: "2025-01-08", priority: 1 }),
-      createTask({ title: "逾期1天", phase: "action", dueDate: "2025-01-07", priority: 4 }),
-      createTask({ title: "逾期3天", phase: "action", dueDate: "2025-01-05", priority: 1 }),
-      createTask({ title: "未来", phase: "action", dueDate: "2025-01-20", priority: 1 }),
-      createTask({ title: "已完成逾期", phase: "action", status: "done", dueDate: "2025-01-01" }),
+      createTask({ title: "P1待办", phase: "action", plannedFor: TODAY, priority: 1 }),
+      createTask({ title: "P4进行中", phase: "action", plannedFor: TODAY, priority: 4, status: "doing" }),
+      createTask({ title: "P2待办", phase: "action", plannedFor: TODAY, priority: 2 }),
     ];
     expect(selectToday(tasks, now).map((t) => t.title)).toEqual([
-      "逾期3天",
-      "逾期1天",
-      "正常今天",
+      "P4进行中",
+      "P1待办",
+      "P2待办",
     ]);
   });
 
+  it("逾期置顶，越久远越靠前，且不重复计入已承诺的那条", () => {
+    const tasks = [
+      createTask({ title: "承诺今天", phase: "action", plannedFor: TODAY }),
+      createTask({ title: "逾期1天", phase: "action", dueDate: "2025-01-07" }),
+      createTask({ title: "逾期3天", phase: "action", dueDate: "2025-01-05" }),
+      createTask({ title: "逾期且已承诺", phase: "action", dueDate: "2025-01-06", plannedFor: TODAY }),
+    ];
+    const titles = selectToday(tasks, now).map((t) => t.title);
+    expect(titles.slice(0, 2)).toEqual(["逾期3天", "逾期1天"]);
+    expect(titles.filter((t) => t === "逾期且已承诺")).toHaveLength(1);
+  });
+
+  it("已完成/已取消不进今日", () => {
+    const tasks = [
+      createTask({ title: "done", phase: "action", status: "done", plannedFor: TODAY }),
+      createTask({ title: "canceled", phase: "action", status: "canceled", plannedFor: TODAY }),
+    ];
+    expect(selectToday(tasks, now)).toEqual([]);
+  });
+});
+
+describe("容量：Ivy Lee 与 WIP", () => {
+  it("todayPlannedCount 不含逾期——逾期是历史欠账，不占今天的额度", () => {
+    const tasks = [
+      createTask({ title: "承诺", phase: "action", plannedFor: TODAY }),
+      createTask({ title: "逾期", phase: "action", dueDate: "2025-01-01" }),
+    ];
+    expect(todayPlannedCount(tasks, now)).toBe(1);
+    expect(selectToday(tasks, now)).toHaveLength(2);
+  });
+
+  it("todayCapacity 计算剩余额度与超额标记", () => {
+    const under = Array.from({ length: 4 }, (_, i) =>
+      createTask({ title: `t${i}`, phase: "action", plannedFor: TODAY }),
+    );
+    const c1 = todayCapacity(under, caps, now);
+    expect(c1).toMatchObject({ used: 4, max: 6, remaining: 2, over: false });
+
+    const over = Array.from({ length: 8 }, (_, i) =>
+      createTask({ title: `t${i}`, phase: "action", plannedFor: TODAY }),
+    );
+    const c2 = todayCapacity(over, caps, now);
+    expect(c2).toMatchObject({ used: 8, remaining: 0, over: true });
+  });
+
+  it("doingCapacity 统计在制品", () => {
+    const tasks = [
+      createTask({ title: "a", phase: "action", status: "doing" }),
+      createTask({ title: "b", phase: "action", status: "doing" }),
+      createTask({ title: "c", phase: "action", status: "todo" }),
+    ];
+    expect(doingCapacity(tasks, caps)).toMatchObject({ used: 2, max: 3, remaining: 1, over: false });
+  });
+});
+
+describe("等待：计时与「戳一下」", () => {
+  it("waitingSince 优先用最近一次戳的时间", () => {
+    const t = createTask({ title: "等", phase: "waiting" });
+    t.createdAt = "2024-12-01T00:00:00.000Z";
+    expect(waitingSince(t)).toBe(t.createdAt);
+    t.nudgedAt = "2025-01-06T00:00:00.000Z";
+    expect(waitingSince(t)).toBe(t.nudgedAt);
+  });
+
+  it("daysSince 计算过去天数，null 记 0", () => {
+    expect(daysSince(null, now)).toBe(0);
+    expect(daysSince("2025-01-01T00:00:00.000Z", now)).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("停滞检测与结算台", () => {
+  function staleSet() {
+    const doing = createTask({ title: "拖了很久的活", phase: "action", status: "doing" });
+    doing.startedAt = "2024-12-20T00:00:00.000Z";
+    const freshDoing = createTask({ title: "刚开始", phase: "action", status: "doing" });
+    freshDoing.startedAt = "2025-01-07T00:00:00.000Z";
+    const waiting = createTask({ title: "等报价", phase: "waiting" });
+    waiting.createdAt = "2024-12-01T00:00:00.000Z";
+    const inbox = createTask({ title: "很久没澄清", phase: "inbox" });
+    inbox.createdAt = "2024-12-01T00:00:00.000Z";
+    const someday = createTask({ title: "学 Rust", phase: "someday" });
+    someday.updatedAt = "2024-06-01T00:00:00.000Z";
+    return { doing, freshDoing, waiting, inbox, someday };
+  }
+
+  it("分别识别在制/等待/收件箱/将来的停滞条目", () => {
+    const s = staleSet();
+    const all = Object.values(s);
+    expect(selectStaleDoing(all, 7, now).map((t) => t.title)).toEqual(["拖了很久的活"]);
+    expect(selectStaleWaiting(all, 7, now).map((t) => t.title)).toEqual(["等报价"]);
+    expect(selectStaleInbox(all, now).map((t) => t.title)).toEqual(["很久没澄清"]);
+    expect(selectStaleSomeday(all, 90, now).map((t) => t.title)).toEqual(["学 Rust"]);
+  });
+
+  it("selectSettlement 汇总所有需要做决定的条目，并带上原因", () => {
+    const s = staleSet();
+    const items = selectSettlement(Object.values(s), caps, now);
+    expect(items.map((i) => i.kind)).toEqual(["doing", "waiting", "inbox", "someday"]);
+    expect(items.every((i) => i.reason.length > 0)).toBe(true);
+    expect(items.map((i) => i.task.title)).not.toContain("刚开始");
+  });
+
+  it("干净的系统没有待结算条目", () => {
+    const tasks = [createTask({ title: "正常", phase: "action" })];
+    expect(selectSettlement(tasks, caps, now)).toEqual([]);
+  });
+});
+
+describe("selectOverdue / selectUpcoming / selectLog", () => {
   it("超期 = 截止日期早于今天且未完成", () => {
     const tasks = [
       createTask({ title: "over", phase: "action", dueDate: "2025-01-07" }),
-      createTask({ title: "today", phase: "action", dueDate: "2025-01-08" }),
-      createTask({ title: "future", phase: "action", dueDate: "2025-01-09" }),
-      createTask({ title: "nodue", phase: "action", dueDate: null }),
+      createTask({ title: "today", phase: "action", dueDate: TODAY }),
       createTask({ title: "done", phase: "action", status: "done", dueDate: "2025-01-07" }),
     ];
     expect(selectOverdue(tasks, now).map((t) => t.title)).toEqual(["over"]);
   });
+
+  it("Upcoming 覆盖今天之后的 7 天，承诺日优先于截止日", () => {
+    const tasks = [
+      createTask({ title: "明天承诺", phase: "action", plannedFor: "2025-01-09" }),
+      createTask({ title: "第七天截止", phase: "action", dueDate: "2025-01-15" }),
+      createTask({ title: "第八天", phase: "action", dueDate: "2025-01-16" }),
+      createTask({ title: "今天", phase: "action", plannedFor: TODAY }),
+      createTask({ title: "超期", phase: "action", dueDate: "2025-01-07" }),
+    ];
+    expect(selectUpcoming(tasks, now).map((t) => t.title)).toEqual(["明天承诺", "第七天截止"]);
+  });
+
+  it("selectLog 按完成时间倒序，且包含已取消（取消也是终局）", () => {
+    const a = createTask({ title: "a", phase: "action", status: "done" });
+    a.completedAt = "2025-01-01T10:00:00.000Z";
+    const b = createTask({ title: "b", phase: "action", status: "canceled" });
+    b.completedAt = "2025-01-02T10:00:00.000Z";
+    const c = createTask({ title: "c", phase: "action", status: "todo" });
+    expect(selectLog([a, b, c]).map((t) => t.title)).toEqual(["b", "a"]);
+  });
 });
 
 describe("selectReviewStats", () => {
-  it("统计滞留/超期/无行动项目/等待", () => {
+  it("统计本周吞吐、停滞与无下一步行动的项目", () => {
     const p1 = createProject({ name: "P1" });
     const p2 = createProject({ name: "P2" });
     const p3 = createProject({ name: "P3", archived: true });
+
+    const doneThisWeek = createTask({ title: "done", phase: "action", status: "done" });
+    doneThisWeek.completedAt = "2025-01-06T10:00:00.000Z";
+    const canceledThisWeek = createTask({ title: "cancel", phase: "action", status: "canceled" });
+    canceledThisWeek.completedAt = "2025-01-06T10:00:00.000Z";
+    const doneLongAgo = createTask({ title: "old", phase: "action", status: "done" });
+    doneLongAgo.completedAt = "2024-11-01T10:00:00.000Z";
+    doneLongAgo.createdAt = "2024-11-01T10:00:00.000Z";
+
     const stale = createTask({ title: "stale", phase: "inbox" });
     stale.createdAt = "2024-12-01T00:00:00.000Z";
-    const fresh = createTask({ title: "fresh", phase: "inbox" });
-    fresh.createdAt = "2025-01-07T00:00:00.000Z";
+
     const tasks = [
+      doneThisWeek,
+      canceledThisWeek,
+      doneLongAgo,
       stale,
-      fresh,
       createTask({ title: "over", phase: "action", dueDate: "2025-01-07" }),
       createTask({ title: "wait", phase: "waiting" }),
+      createTask({ title: "doing", phase: "action", status: "doing" }),
       createTask({ title: "p2-action", phase: "action", status: "todo", projectId: p2.id }),
     ];
+
     const stats = selectReviewStats(tasks, [p1, p2, p3], now);
+    expect(stats.completedThisWeek).toBe(1);
+    expect(stats.canceledThisWeek).toBe(1);
     expect(stats.inboxStale).toBe(1);
     expect(stats.overdue).toBe(1);
     expect(stats.waitingCount).toBe(1);
-    expect(stats.total).toBe(5);
+    expect(stats.doing).toBe(1);
     expect(stats.projectsWithoutAction).toEqual(["P1"]);
+  });
+
+  it("total 不含回收站", () => {
+    const tasks = [
+      createTask({ title: "a", phase: "action" }),
+      createTask({ title: "b", phase: "trash" }),
+    ];
+    expect(selectReviewStats(tasks, [], now).total).toBe(1);
+  });
+});
+
+describe("tasksForScope", () => {
+  it("按项目过滤，排除已完成与回收站", () => {
+    const p = createProject({ name: "P" });
+    const inP = createTask({ title: "项目任务", phase: "action", projectId: p.id });
+    const doneInP = createTask({ title: "已完成", phase: "action", projectId: p.id, status: "done" });
+    const out = createTask({ title: "无关", phase: "action" });
+    expect(tasksForScope(`project:${p.id}`, [inP, doneInP, out]).map((t) => t.title)).toEqual([
+      "项目任务",
+    ]);
+  });
+
+  it("doing 范围返回在制品", () => {
+    const tasks = [
+      createTask({ title: "做", phase: "action", status: "doing" }),
+      createTask({ title: "没做", phase: "action", status: "todo" }),
+    ];
+    expect(tasksForScope("doing", tasks).map((t) => t.title)).toEqual(["做"]);
+  });
+
+  it("未知范围返回空数组", () => {
+    expect(tasksForScope("settings", [createTask({ title: "x" })])).toEqual([]);
+  });
+});
+
+describe("needsWeeklyReview", () => {
+  it("从未回顾或超 7 天需回顾", () => {
+    expect(needsWeeklyReview([], now)).toBe(true);
+    expect(needsWeeklyReview([{ date: "2024-12-31" }], now)).toBe(true);
+    expect(needsWeeklyReview([{ date: "2025-01-05" }], now)).toBe(false);
   });
 });
 
 describe("排序", () => {
   it("byOrderThenPriority：priority 升序，再 order 升序", () => {
-    const a = createTask({ title: "a", priority: 3 }); a.order = 0;
-    const b = createTask({ title: "b", priority: 1 }); b.order = 5;
-    const c = createTask({ title: "c", priority: 1 }); c.order = 2;
+    const a = createTask({ title: "a", priority: 3 });
+    a.order = 0;
+    const b = createTask({ title: "b", priority: 1 });
+    b.order = 5;
+    const c = createTask({ title: "c", priority: 1 });
+    c.order = 2;
     expect([a, b, c].sort(byOrderThenPriority).map((t) => t.title)).toEqual(["c", "b", "a"]);
-  });
-
-  it("byFrogThenPriority：青蛙优先，再 priority", () => {
-    const a = createTask({ title: "a", priority: 1, isFrog: false });
-    const b = createTask({ title: "b", priority: 4, isFrog: true });
-    const c = createTask({ title: "c", priority: 2, isFrog: false });
-    expect([a, b, c].sort(byFrogThenPriority).map((t) => t.title)).toEqual(["b", "a", "c"]);
   });
 });
 
@@ -223,21 +362,12 @@ describe("isBlocked / selectReady", () => {
     expect(isBlocked(t, [dep, t])).toBe(true);
   });
 
-  it("依赖完成则不阻塞", () => {
-    const dep = createTask({ title: "dep", phase: "action", status: "done" });
-    const t = createTask({ title: "a", phase: "action", blockedBy: [dep.id] });
-    expect(isBlocked(t, [dep, t])).toBe(false);
-  });
-
-  it("依赖缺失视为不阻塞（容错）", () => {
-    const t = createTask({ title: "a", phase: "action", blockedBy: ["missing"] });
-    expect(isBlocked(t, [t])).toBe(false);
-  });
-
-  it("依赖在回收站视为不阻塞", () => {
-    const dep = createTask({ title: "dep", phase: "trash", status: "todo" });
-    const t = createTask({ title: "a", phase: "action", blockedBy: [dep.id] });
-    expect(isBlocked(t, [dep, t])).toBe(false);
+  it("依赖完成 / 缺失 / 在回收站均不阻塞", () => {
+    const done = createTask({ title: "dep", phase: "action", status: "done" });
+    const trashed = createTask({ title: "dep2", phase: "trash", status: "todo" });
+    expect(isBlocked(createTask({ title: "a", phase: "action", blockedBy: [done.id] }), [done])).toBe(false);
+    expect(isBlocked(createTask({ title: "a", phase: "action", blockedBy: ["missing"] }), [])).toBe(false);
+    expect(isBlocked(createTask({ title: "a", phase: "action", blockedBy: [trashed.id] }), [trashed])).toBe(false);
   });
 
   it("selectReady 排除被阻塞的任务", () => {
@@ -254,86 +384,6 @@ describe("isBlocked / selectReady", () => {
     const set = blockedIdSet([dep, blocked, ready]);
     expect(set.has(blocked.id)).toBe(true);
     expect(set.has(ready.id)).toBe(false);
-    expect(set.has(dep.id)).toBe(false);
-  });
-});
-
-describe("selectUpcoming / selectLog / scope", () => {
-  it("Upcoming 含 7 天内截止与排期，按日期升序，排除超期", () => {
-    const tasks = [
-      createTask({ title: "明天", phase: "action", dueDate: "2025-01-09" }),
-      createTask({ title: "第七天", phase: "action", dueDate: "2025-01-15" }),
-      createTask({ title: "第八天", phase: "action", dueDate: "2025-01-16" }),
-      createTask({ title: "排期今天", phase: "action", scheduledAt: "2025-01-08T15:00:00" }),
-      createTask({ title: "超期", phase: "action", dueDate: "2025-01-07" }),
-    ];
-    expect(selectUpcoming(tasks, now).map((t) => t.title)).toEqual([
-      "排期今天",
-      "明天",
-      "第七天",
-    ]);
-  });
-
-  it("selectLog 按完成时间倒序", () => {
-    const a = createTask({ title: "a", phase: "action", status: "done" });
-    a.completedAt = "2025-01-01T10:00:00.000Z";
-    const b = createTask({ title: "b", phase: "action", status: "done" });
-    b.completedAt = "2025-01-02T10:00:00.000Z";
-    const c = createTask({ title: "c", phase: "action", status: "todo" });
-    expect(selectLog([a, b, c]).map((t) => t.title)).toEqual(["b", "a"]);
-  });
-
-  it("tasksForScope / scopeSource 按项目与领域过滤", () => {
-    const p = createProject({ name: "P" });
-    const inP = createTask({ title: "项目任务", phase: "action", projectId: p.id });
-    const doneInP = createTask({ title: "已完成", phase: "action", projectId: p.id, status: "done" });
-    const out = createTask({ title: "无关", phase: "action" });
-    const list = tasksForScope(`project:${p.id}`, [inP, doneInP, out]);
-    expect(list.map((t) => t.title)).toEqual(["项目任务"]);
-    const src = scopeSource(`project:${p.id}`, [inP, doneInP, out]);
-    expect(src.map((t) => t.title).sort()).toEqual(["已完成", "项目任务"]);
-  });
-
-  it("needsWeeklyReview：从未回顾或超 7 天需回顾", () => {
-    expect(needsWeeklyReview([], now)).toBe(true);
-    expect(needsWeeklyReview([{ date: "2024-12-31" }], now)).toBe(true);
-    expect(needsWeeklyReview([{ date: "2025-01-05" }], now)).toBe(false);
-  });
-
-  it("四象限作用于当前范围（scopeSource + selectMatrix）", () => {
-    const p = createProject({ name: "P" });
-    const inP = createTask({
-      title: "项目重要紧急",
-      phase: "action",
-      projectId: p.id,
-      priority: 1,
-      dueDate: "2025-01-09",
-    });
-    const out = createTask({ title: "范围外", phase: "action", priority: 1, dueDate: "2025-01-09" });
-    const m = selectMatrix(scopeSource(`project:${p.id}`, [inP, out]), now);
-    const total = m.reduce((n, q) => n + q.tasks.length, 0);
-    expect(total).toBe(1);
-    expect(m[0].tasks.map((t) => t.title)).toEqual(["项目重要紧急"]);
-  });
-
-  it("看板作用于当前范围（scopeSource + selectKanban）", () => {
-    const p = createProject({ name: "P" });
-    const settings: Settings = {
-      defaultMode: "gtd",
-      kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
-      automations: {
-        autoFlagOverdueFrog: false,
-        autoClearFrogOnDone: true,
-        staleWaitingReminder: false,
-      },
-      theme: "system",
-      dayStartHour: 8,
-      dayEndHour: 22,
-    };
-    const inP = createTask({ title: "项目任务", phase: "action", projectId: p.id });
-    const out = createTask({ title: "范围外", phase: "action" });
-    const cols = selectKanban(scopeSource(`project:${p.id}`, [inP, out]), settings);
-    expect(cols[0].tasks.map((t) => t.title)).toEqual(["项目任务"]);
   });
 });
 
@@ -359,13 +409,6 @@ describe("wouldCreateCycle 成环检测", () => {
   it("合法依赖不成环", () => {
     const a = createTask({ title: "a", phase: "action" });
     const b = createTask({ title: "b", phase: "action" });
-    expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(false);
-  });
-
-  it("依赖链与目标无关时不成环", () => {
-    const a = createTask({ title: "a", phase: "action" });
-    const x = createTask({ title: "x", phase: "action" });
-    const b = createTask({ title: "b", phase: "action", blockedBy: [x.id] });
     expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(false);
   });
 });

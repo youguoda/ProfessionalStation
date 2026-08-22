@@ -6,10 +6,11 @@ import type {
   AgentProfile,
   Area,
   ChatMessage,
+  CoachNudge,
   Db,
-  DisplayMode,
   Habit,
   HabitCheck,
+  Note,
   Project,
   ScopeId,
   Tag,
@@ -18,12 +19,14 @@ import type {
 } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 import { applyTheme } from "@/lib/client/theme";
+import { defaultSettings } from "@/lib/domain/factory";
 
 interface AppState {
   loaded: boolean;
   loading: boolean;
   error: string | null;
   tasks: Task[];
+  notes: Note[];
   projects: Project[];
   areas: Area[];
   tags: Tag[];
@@ -36,25 +39,33 @@ interface AppState {
   agentOpen: boolean;
   agentProfile: AgentProfile | null;
   chatMessages: ChatMessage[];
+  /** 马力今天主动说的那一句（null = 今天没什么好说的） */
+  nudge: CoachNudge | null;
 
   scope: ScopeId;
-  mode: DisplayMode;
   search: string;
 
   load: () => Promise<void>;
   setScope: (scope: ScopeId) => void;
-  setMode: (mode: DisplayMode) => void;
   setSearch: (q: string) => void;
 
   addTask: (input: Record<string, unknown>) => Promise<Task>;
   transition: (id: string, event: TaskEvent) => Promise<Task>;
   updateTask: (id: string, patch: Record<string, unknown>) => Promise<Task>;
   deleteTask: (id: string) => Promise<void>;
+  nudgeTask: (id: string) => Promise<Task>;
+  taskToNote: (id: string) => Promise<Note>;
+  /** 承诺某天做（null = 移出今天） */
+  planTask: (id: string, day: string | null) => Promise<Task>;
+
+  createNote: (content: string, extra?: Record<string, unknown>) => Promise<Note>;
+  updateNote: (id: string, patch: Record<string, unknown>) => Promise<Note>;
+  deleteNote: (id: string) => Promise<void>;
 
   createProject: (name: string) => Promise<Project>;
   updateProject: (id: string, patch: Record<string, unknown>) => Promise<Project>;
   createArea: (name: string) => Promise<Area>;
-  createTag: (name: string, kind: "tag" | "context") => Promise<Tag>;
+  createTag: (name: string) => Promise<Tag>;
   updateSettings: (patch: Record<string, unknown>) => Promise<Db["settings"]>;
   setTheme: (mode: ThemeMode) => Promise<void>;
   saveReview: (notes: string, checklist: Record<string, boolean>) => Promise<void>;
@@ -63,8 +74,11 @@ interface AppState {
   deleteHabit: (id: string) => Promise<void>;
   toggleHabitCheck: (habitId: string, date: string) => Promise<void>;
   runAutomations: () => Promise<{ applied: number; notifications: string[] }>;
+  resetData: () => Promise<void>;
 
   setAgentOpen: (open: boolean) => void;
+  loadNudge: () => Promise<void>;
+  dismissNudge: () => Promise<void>;
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
   selectedTaskId: string | null;
@@ -89,35 +103,38 @@ function upsert(list: Task[], task: Task): Task[] {
   return next;
 }
 
+/** 给错误加上任务标题前缀，让 toast 能说清「哪条任务出了什么问题」 */
+function withTaskContext(get: () => AppState, id: string) {
+  return (e: unknown): never => {
+    const t = get().tasks.find((x) => x.id === id);
+    const msg = e instanceof Error ? e.message : "操作失败";
+    throw new Error(t ? `「${t.title}」：${msg}` : msg);
+  };
+}
+
 export const useStore = create<AppState>((set, get) => ({
   loaded: false,
   loading: false,
   error: null,
   tasks: [],
+  notes: [],
   projects: [],
   areas: [],
   tags: [],
   habits: [],
   habitChecks: [],
   weeklyReviews: [],
-  settings: {
-    defaultMode: "gtd",
-    kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
-    automations: { autoFlagOverdueFrog: false, autoClearFrogOnDone: true, staleWaitingReminder: false },
-    theme: "system",
-    dayStartHour: 8,
-    dayEndHour: 22,
-  },
+  settings: defaultSettings(),
   automationLog: [],
   aiStatus: null,
   agentOpen: false,
   agentProfile: null,
   chatMessages: [],
+  nudge: null,
   paletteOpen: false,
   selectedTaskId: null,
 
   scope: "today",
-  mode: "list",
   search: "",
 
   load: async () => {
@@ -131,6 +148,7 @@ export const useStore = create<AppState>((set, get) => ({
       ]);
       set({
         tasks: db.tasks,
+        notes: db.notes,
         projects: db.projects,
         areas: db.areas,
         tags: db.tags,
@@ -145,9 +163,8 @@ export const useStore = create<AppState>((set, get) => ({
         loading: false,
       });
       applyTheme(db.settings.theme);
-      // 自动化：有规则开启时，加载后自动运行一次
       const a = db.settings.automations;
-      if (a.autoFlagOverdueFrog || a.autoClearFrogOnDone || a.staleWaitingReminder) {
+      if (a.autoClearPlanOnDone || a.staleWaitingReminder) {
         await get().runAutomations();
       }
     } catch (e) {
@@ -156,7 +173,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setScope: (scope) => set({ scope, search: "" }),
-  setMode: (mode) => set({ mode }),
   setSearch: (search) => set({ search }),
 
   addTask: async (input) => {
@@ -166,32 +182,38 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   transition: async (id, event) => {
-    const { task, spawned } = await api.transition(id, event).catch((e) => {
-      const t = get().tasks.find((x) => x.id === id);
-      const msg = e instanceof Error ? e.message : "操作失败";
-      throw new Error(t ? `「${t.title}」：${msg}` : msg);
-    });
+    const { task, spawned } = await api
+      .transition(id, event)
+      .catch(withTaskContext(get, id));
     set({ tasks: upsert(get().tasks, task) });
-    // 重复任务完成时服务端生成的下一次直接并入，无需全量重载（消除闪屏）
     if (spawned) set({ tasks: upsert(get().tasks, spawned) });
     return task;
   },
 
   updateTask: async (id, patch) => {
-    const task = await api.updateTask(id, patch).catch((e) => {
-      const t = get().tasks.find((x) => x.id === id);
-      const msg = e instanceof Error ? e.message : "操作失败";
-      throw new Error(t ? `「${t.title}」：${msg}` : msg);
-    });
+    const task = await api.updateTask(id, patch).catch(withTaskContext(get, id));
     set({ tasks: upsert(get().tasks, task) });
     return task;
+  },
+
+  planTask: async (id, day) => get().updateTask(id, { plannedFor: day }),
+
+  nudgeTask: async (id) => {
+    const task = await api.nudgeTask(id).catch(withTaskContext(get, id));
+    set({ tasks: upsert(get().tasks, task) });
+    return task;
+  },
+
+  taskToNote: async (id) => {
+    const { note, task } = await api.taskToNote(id).catch(withTaskContext(get, id));
+    set({ tasks: upsert(get().tasks, task), notes: [...get().notes, note] });
+    return note;
   },
 
   deleteTask: async (id) => {
     const prev = get().tasks.find((t) => t.id === id);
     await api.deleteTask(id);
     if (!prev) return;
-    // 本地同步软删/硬删，不做全量重载
     if (prev.phase === "trash") {
       set({ tasks: get().tasks.filter((t) => t.id !== id) });
     } else {
@@ -199,10 +221,28 @@ export const useStore = create<AppState>((set, get) => ({
         tasks: upsert(get().tasks, {
           ...prev,
           phase: "trash",
+          plannedFor: null,
           updatedAt: new Date().toISOString(),
         }),
       });
     }
+  },
+
+  createNote: async (content, extra) => {
+    const note = await api.createNote({ content, ...(extra ?? {}) });
+    set({ notes: [...get().notes, note] });
+    return note;
+  },
+
+  updateNote: async (id, patch) => {
+    const note = await api.updateNote(id, patch);
+    set({ notes: get().notes.map((n) => (n.id === id ? note : n)) });
+    return note;
+  },
+
+  deleteNote: async (id) => {
+    await api.deleteNote(id);
+    set({ notes: get().notes.filter((n) => n.id !== id) });
   },
 
   createProject: async (name) => {
@@ -223,8 +263,8 @@ export const useStore = create<AppState>((set, get) => ({
     return area;
   },
 
-  createTag: async (name, kind) => {
-    const tag = await api.createTag(name, kind);
+  createTag: async (name) => {
+    const tag = await api.createTag(name);
     if (!get().tags.some((t) => t.id === tag.id)) {
       set({ tags: [...get().tags, tag] });
     }
@@ -282,7 +322,24 @@ export const useStore = create<AppState>((set, get) => ({
     return { applied: result.applied, notifications: result.notifications };
   },
 
+  resetData: async () => {
+    await api.resetData();
+    set({ tasks: [], notes: [], selectedTaskId: null });
+  },
+
   setAgentOpen: (open) => set({ agentOpen: open }),
+
+  loadNudge: async () => {
+    // 教练是可选的：拿不到就当今天没什么好说的，绝不打断主流程
+    const { nudge } = await api.coachNudge().catch(() => ({ nudge: null }));
+    set({ nudge });
+  },
+
+  dismissNudge: async () => {
+    const current = get().nudge;
+    set({ nudge: null });
+    if (current) await api.dismissNudge(current.id).catch(() => {});
+  },
 
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   openTask: (id) => set({ selectedTaskId: id }),

@@ -74,16 +74,23 @@ describe("executeProposalTool（建议执行器，走现有状态机 API）", ()
     expect(useStore.getState().tasks[0].status).toBe("done");
   });
 
-  it("set_priority / mark_frog / add_note 依次生效", async () => {
+  it("set_priority / plan_today / add_note 依次生效", async () => {
     const t = createTask({ title: "x", phase: "action", notes: "旧" });
     useStore.setState({ tasks: [t] });
     await executeProposalTool(proposal("set_priority", { taskId: t.id, priority: 1 }));
-    await executeProposalTool(proposal("mark_frog", { taskId: t.id, isFrog: true }));
+    await executeProposalTool(proposal("plan_today", { taskId: t.id, day: "2025-01-08" }));
     await executeProposalTool(proposal("add_note", { taskId: t.id, note: "新" }));
     const task = useStore.getState().tasks[0];
     expect(task.priority).toBe(1);
-    expect(task.isFrog).toBe(true);
+    expect(task.plannedFor).toBe("2025-01-08");
     expect(task.notes).toBe("旧\n新");
+  });
+
+  it("plan_today 传 null 可把任务移出今天", async () => {
+    const t = createTask({ title: "x", phase: "action", plannedFor: "2025-01-08" });
+    useStore.setState({ tasks: [t] });
+    await executeProposalTool(proposal("plan_today", { taskId: t.id, day: null }));
+    expect(useStore.getState().tasks[0].plannedFor).toBeNull();
   });
 
   it("reschedule_task 写入 dueDate 与 scheduledAt（补秒）", async () => {
@@ -102,10 +109,10 @@ describe("executeProposalTool（建议执行器，走现有状态机 API）", ()
   });
 
   it("状态机拒绝时错误向上抛出并带任务标题", async () => {
-    const ref = createTask({ title: "资料", phase: "reference" });
-    useStore.setState({ tasks: [ref] });
+    const someday = createTask({ title: "将来做", phase: "someday" });
+    useStore.setState({ tasks: [someday] });
     await expect(
-      executeProposalTool(proposal("complete_task", { taskId: ref.id })),
-    ).rejects.toThrow("「资料」");
+      executeProposalTool(proposal("complete_task", { taskId: someday.id })),
+    ).rejects.toThrow("「将来做」");
   });
 });

@@ -10,7 +10,7 @@ describe("buildAgentContext", () => {
     const db: Db = {
       ...emptyDb(),
       tasks: [
-        createTask({ title: "今日任务", phase: "action", dueDate: "2025-01-08", priority: 1 }),
+        createTask({ title: "今日任务", phase: "action", plannedFor: "2025-01-08", priority: 1 }),
         createTask({ title: "超期任务", phase: "action", dueDate: "2025-01-07", priority: 2 }),
         createTask({ title: "下一步", phase: "action", priority: 3 }),
         createTask({ title: "等待项", phase: "waiting" }),
@@ -20,10 +20,13 @@ describe("buildAgentContext", () => {
     };
     const s = buildAgentContext(db, now);
     expect(s).toContain("今天是 2025-01-08。");
-    // 逾期任务置顶进「今日」（视图一致性），因此今日=2
-    expect(s).toContain("【今日】2 个任务：");
+    // 注入两条约束，马力据此才能提出有意义的建议
+    expect(s).toContain("【约束】今天已承诺 1/6 条");
+    expect(s).toContain("在制 0/3 个");
+    // 逾期任务置顶进「今天」（视图一致性），因此今天=2
+    expect(s).toContain("【今天（我承诺要做的）】2 个：");
     expect(s).toContain("今日任务");
-    expect(s).toContain("【超期】1 个：");
+    expect(s).toContain("【逾期】1 个：");
     expect(s).toContain("超期任务");
     expect(s).toContain("【等待】1 个：");
     expect(s).toContain("【收件箱】1 个待澄清");
@@ -42,7 +45,8 @@ describe("buildAgentContext", () => {
 
   it("空数据时给出占位而不是报错", () => {
     const s = buildAgentContext(emptyDb(), now);
-    expect(s).toContain("【今日】0 个任务：");
+    expect(s).toContain("【今天（我承诺要做的）】0 个：");
+    expect(s).toContain("【进行中】0 个：");
     expect(s).toContain("（无）");
     expect(s).toContain("（未设置）");
   });

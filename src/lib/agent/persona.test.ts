@@ -8,13 +8,19 @@ import {
 } from "./persona";
 
 describe("persona 模板", () => {
-  it("内置 4 套模板且 id 唯一", () => {
-    expect(PERSONA_TEMPLATES).toHaveLength(4);
-    expect(new Set(PERSONA_TEMPLATES.map((p) => p.id)).size).toBe(4);
+  it("内置 5 套模板且 id 唯一", () => {
+    expect(PERSONA_TEMPLATES).toHaveLength(5);
+    expect(new Set(PERSONA_TEMPLATES.map((p) => p.id)).size).toBe(5);
   });
 
-  it("未知 id 回退第一套模板", () => {
-    expect(getPersona("unknown").id).toBe(PERSONA_TEMPLATES[0].id);
+  it("未知 id 回退第一套模板（损友）", () => {
+    expect(getPersona("unknown").id).toBe("roaster");
+    expect(PERSONA_TEMPLATES[0].id).toBe("roaster");
+  });
+
+  it("损友模板带情绪调动策略，其余模板没有", () => {
+    expect(getPersona("roaster").tactics?.length).toBeGreaterThan(0);
+    expect(getPersona("comrade").tactics).toBeUndefined();
   });
 });
 
@@ -58,6 +64,24 @@ describe("assembleSystemPrompt", () => {
     expect(s).toContain("<可用工具");
     expect(s).toContain('"proposals"');
     expect(s).toContain("早期摘要内容");
+  });
+
+  it("损友人格：策略段落注入，且底线保留「只攻击想法不攻击人」", () => {
+    const profile = defaultAgentProfile();
+    const s = assembleSystemPrompt(profile, "ctx", "tools", "mem");
+    expect(profile.personaId).toBe("roaster");
+    expect(s).toContain("<情绪调动策略>");
+    expect(s).toContain("先接住再掀翻");
+    expect(s).toContain("从不人身攻击");
+  });
+
+  it("nudge 模式：一句话、无工具段、明确说明是主动开口", () => {
+    const s = assembleSystemPrompt(defaultAgentProfile(), "ctx", "tools", "mem", "nudge", "");
+    expect(s).not.toContain("<可用工具");
+    expect(s).toContain("主动开口");
+    expect(s).toContain("一句话");
+    expect(s).toContain("60 字");
+    expect(s).toContain("记忆内容".replace("记忆内容", "mem")); // 记忆仍然注入
   });
 
   it("chat 模式（默认）含摘要注入", () => {

@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { transitionTask } from "@/lib/db/store";
+import type { TaskEvent } from "@/lib/engine/stateMachine";
 
-const EVENT_TYPES = ["clarify", "start", "complete", "reopen", "cancel", "setStatus", "trash", "restore"] as const;
+const EVENT_TYPES = [
+  "clarify",
+  "start",
+  "stop",
+  "complete",
+  "reopen",
+  "cancel",
+  "trash",
+  "restore",
+] as const;
+
+const CLARIFY_TARGETS = ["action", "waiting", "someday"] as const;
 
 export async function POST(
   req: Request,
@@ -14,14 +26,22 @@ export async function POST(
     return NextResponse.json({ error: "非法事件类型" }, { status: 400 });
   }
 
-  const event =
-    body.type === "clarify"
-      ? { type: "clarify" as const, target: body.target }
-      : body.type === "setStatus"
-        ? { type: "setStatus" as const, status: body.status }
-        : { type: body.type };
+  let event: TaskEvent;
+  if (body.type === "clarify") {
+    if (!CLARIFY_TARGETS.includes(body.target)) {
+      return NextResponse.json({ error: "非法澄清目标" }, { status: 400 });
+    }
+    event = { type: "clarify", target: body.target };
+  } else if (body.type === "cancel") {
+    event = {
+      type: "cancel",
+      reason: typeof body.reason === "string" ? body.reason.slice(0, 200) : undefined,
+    };
+  } else {
+    event = { type: body.type };
+  }
 
-  const result = await transitionTask(id, event as never);
+  const result = await transitionTask(id, event);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 409 });
   }

@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createTempStore } from "@/test/tmpStore";
+import { isoDay } from "@/lib/engine/selectors";
 import * as store from "./store";
 
 const ts = createTempStore();
@@ -62,32 +63,135 @@ describe("依赖成环防护", () => {
   });
 });
 
-describe("青蛙约束", () => {
-  it("第一只青蛙可设置", async () => {
-    const a = await store.createTask({ title: "a", phase: "action" });
-    const r = await store.updateTask(a.id, { isFrog: true });
-    expect(r.ok).toBe(true);
+describe("在制品上限（WIP）", () => {
+  async function startN(n: number) {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const t = await store.createTask({ title: `t${i}`, phase: "action" });
+      const r = await store.transitionTask(t.id, { type: "start" });
+      expect(r.ok).toBe(true);
+      ids.push(t.id);
+    }
+    return ids;
+  }
+
+  it("达到上限前可以正常开始", async () => {
+    await startN(3); // 默认 maxDoing = 3
+    const tasks = await store.listTasks();
+    expect(tasks.filter((t) => t.status === "doing")).toHaveLength(3);
   });
 
-  it("第二只青蛙被拒绝并返回 INVALID_FROG", async () => {
-    const a = await store.createTask({ title: "a", phase: "action" });
-    const b = await store.createTask({ title: "b", phase: "action" });
-    await store.updateTask(a.id, { isFrog: true });
-    const r = await store.updateTask(b.id, { isFrog: true });
+  it("超过上限时 start 被硬拦，并说明怎么解决", async () => {
+    await startN(3);
+    const extra = await store.createTask({ title: "第四件", phase: "action" });
+    const r = await store.transitionTask(extra.id, { type: "start" });
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.code).toBe("INVALID_FROG");
-      expect(r.error).toContain("a");
+      expect(r.error).toContain("上限 3");
+      expect(r.error).toContain("放回待办");
     }
   });
 
-  it("先取消旧青蛙再设新的可成功", async () => {
-    const a = await store.createTask({ title: "a", phase: "action" });
+  it("结掉一件之后又能开始新的", async () => {
+    const ids = await startN(3);
+    await store.transitionTask(ids[0], { type: "complete" });
+    const extra = await store.createTask({ title: "第四件", phase: "action" });
+    expect((await store.transitionTask(extra.id, { type: "start" })).ok).toBe(true);
+  });
+
+  it("放回待办同样释放名额", async () => {
+    const ids = await startN(3);
+    const stopped = await store.transitionTask(ids[0], { type: "stop" });
+    expect(stopped.ok).toBe(true);
+    const extra = await store.createTask({ title: "第四件", phase: "action" });
+    expect((await store.transitionTask(extra.id, { type: "start" })).ok).toBe(true);
+  });
+
+  it("上限可调：设为 1 后第二件就被拦下", async () => {
+    await store.updateSettings({ maxDoing: 1 });
+    await startN(1);
     const b = await store.createTask({ title: "b", phase: "action" });
-    await store.updateTask(a.id, { isFrog: true });
-    await store.updateTask(a.id, { isFrog: false });
-    const r = await store.updateTask(b.id, { isFrog: true });
+    expect((await store.transitionTask(b.id, { type: "start" })).ok).toBe(false);
+  });
+});
+
+describe("开始即承诺", () => {
+  it("start 会把任务自动放进今天", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    const r = await store.transitionTask(t.id, { type: "start" });
     expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.plannedFor).toBe(isoDay(new Date()));
+  });
+
+  it("已有承诺日的任务 start 不会被覆盖", async () => {
+    const t = await store.createTask({ title: "x", phase: "action", plannedFor: "2030-01-01" });
+    const r = await store.transitionTask(t.id, { type: "start" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.plannedFor).toBe("2030-01-01");
+  });
+
+  it("完成后自动移出今天（默认开启）", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    await store.transitionTask(t.id, { type: "start" });
+    const r = await store.transitionTask(t.id, { type: "complete" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.plannedFor).toBeNull();
+  });
+
+  it("取消同样移出今天并记录原因", async () => {
+    const t = await store.createTask({ title: "x", phase: "action", plannedFor: "2025-01-08" });
+    const r = await store.transitionTask(t.id, { type: "cancel", reason: "需求砍了" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.plannedFor).toBeNull();
+      expect(r.task.canceledReason).toBe("需求砍了");
+    }
+  });
+});
+
+describe("等待项「戳一下」", () => {
+  it("nudgeTask 重置计时并记历史", async () => {
+    const t = await store.createTask({ title: "等报价", phase: "waiting" });
+    expect(t.nudgedAt).toBeNull();
+    const nudged = await store.nudgeTask(t.id);
+    expect(nudged).not.toBeNull();
+    expect(nudged!.nudgedAt).not.toBeNull();
+    expect(nudged!.history.map((h) => h.label)).toContain("戳了一下");
+  });
+
+  it("未知 id 返回 null", async () => {
+    expect(await store.nudgeTask("missing")).toBeNull();
+  });
+});
+
+describe("转化为笔记（终局之一）", () => {
+  it("内容留存到笔记，任务移入回收站可恢复", async () => {
+    const t = await store.createTask({ title: "VLLM 报错", notes: "block_size 调到 16", phase: "inbox" });
+    const r = await store.convertTaskToNote(t.id);
+    expect(r).not.toBeNull();
+    expect(r!.note.content).toContain("VLLM 报错");
+    expect(r!.note.content).toContain("block_size");
+    expect(r!.task.phase).toBe("trash");
+    expect(await store.listNotes()).toHaveLength(1);
+  });
+
+  it("未知 id 返回 null", async () => {
+    expect(await store.convertTaskToNote("missing")).toBeNull();
+  });
+});
+
+describe("笔记 CRUD", () => {
+  it("增改查删", async () => {
+    const n = await store.createNote({ content: "第一条" });
+    expect(await store.listNotes()).toHaveLength(1);
+
+    const updated = await store.updateNote(n.id, { content: "改过了" });
+    expect(updated!.content).toBe("改过了");
+    expect(updated!.createdAt).toBe(n.createdAt);
+
+    expect(await store.deleteNote(n.id)).toBe(true);
+    expect(await store.listNotes()).toHaveLength(0);
+    expect(await store.deleteNote(n.id)).toBe(false);
   });
 });
 
@@ -108,7 +212,7 @@ describe("重复任务", () => {
     expect(spawned!.status).toBe("todo");
     expect(spawned!.dueDate).toBe("2025-01-16");
     expect(spawned!.repeatRule).toBe("daily");
-    expect(spawned!.isFrog).toBe(false);
+    expect(spawned!.plannedFor).toBeNull();
     expect(spawned!.blockedBy).toEqual([]);
   });
 
@@ -156,9 +260,9 @@ describe("软硬删除", () => {
 });
 
 describe("标签去重", () => {
-  it("同名同 kind 复用同一 id", async () => {
-    const a = await store.getOrCreateTag("home", "context");
-    const b = await store.getOrCreateTag("home", "context");
+  it("同名复用同一 id", async () => {
+    const a = await store.getOrCreateTag("home");
+    const b = await store.getOrCreateTag("home");
     expect(a.id).toBe(b.id);
     expect(await store.listTags()).toHaveLength(1);
   });
@@ -190,9 +294,16 @@ describe("周回顾与设置", () => {
   });
 
   it("updateSettings 返回更新后的值", async () => {
-    const s = await store.updateSettings({ defaultMode: "kanban" });
-    expect(s.defaultMode).toBe("kanban");
-    expect((await store.getSettings()).defaultMode).toBe("kanban");
+    const s = await store.updateSettings({ maxToday: 3 });
+    expect(s.maxToday).toBe(3);
+    expect((await store.getSettings()).maxToday).toBe(3);
+  });
+
+  it("updateSettings 合并 automations，不整体覆盖", async () => {
+    await store.updateSettings({ automations: { staleWaitingReminder: true } as never });
+    const s = await store.getSettings();
+    expect(s.automations.staleWaitingReminder).toBe(true);
+    expect(s.automations.autoClearPlanOnDone).toBe(true);
   });
 });
 
@@ -226,61 +337,238 @@ describe("习惯追踪", () => {
 });
 
 describe("自动化运行", () => {
-  it("runAutomations 应用超期青蛙标记且幂等", async () => {
-    await store.updateSettings({
-      automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false },
+  it("清除已结束任务的承诺日，且幂等", async () => {
+    const t = await store.createTask({
+      title: "x",
+      phase: "action",
+      status: "done",
+      plannedFor: "2025-01-08",
     });
-    const t = await store.createTask({ title: "报告", phase: "action", dueDate: "2020-01-01" });
     const r = await store.runAutomations();
     expect(r.applied).toBe(1);
-    expect(r.notifications.length).toBeGreaterThanOrEqual(1);
-    expect((await store.getTask(t.id))!.isFrog).toBe(true);
+    expect((await store.getTask(t.id))!.plannedFor).toBeNull();
     expect((await store.runAutomations()).applied).toBe(0);
   });
 
-  it("默认关闭：runAutomations 不自动标记青蛙", async () => {
-    const t = await store.createTask({ title: "报告", phase: "action", dueDate: "2020-01-01" });
-    const r = await store.runAutomations();
-    expect(r.applied).toBe(0);
-    expect((await store.getTask(t.id))!.isFrog).toBe(false);
+  it("未完成任务的承诺日不被清除", async () => {
+    const t = await store.createTask({
+      title: "x",
+      phase: "action",
+      plannedFor: "2025-01-08",
+    });
+    expect((await store.runAutomations()).applied).toBe(0);
+    expect((await store.getTask(t.id))!.plannedFor).toBe("2025-01-08");
   });
 
-  it("runAutomations 清除已完成任务的青蛙", async () => {
-    const t = await store.createTask({ title: "x", phase: "action", status: "done", isFrog: true });
-    const r = await store.runAutomations();
-    expect(r.applied).toBe(1);
-    expect((await store.getTask(t.id))!.isFrog).toBe(false);
+  it("规则关闭后不再清除", async () => {
+    await store.updateSettings({
+      automations: { autoClearPlanOnDone: false, staleWaitingReminder: false },
+    });
+    const t = await store.createTask({
+      title: "x",
+      phase: "action",
+      status: "done",
+      plannedFor: "2025-01-08",
+    });
+    expect((await store.runAutomations()).applied).toBe(0);
+    expect((await store.getTask(t.id))!.plannedFor).toBe("2025-01-08");
   });
+});
 
-  it("旧数据迁移：缺失 habits/automations 字段的 db 可正常读取", async () => {
+describe("旧数据迁移", () => {
+  async function writeLegacy(old: unknown) {
     const { promises: fs } = await import("node:fs");
     const { join } = await import("node:path");
-    await store.createTask({ title: "x" }); // 确保数据目录存在
+    await store.createTask({ title: "seed" }); // 确保数据目录存在
     const file = join(process.env.DATA_DIR!, "db.json");
-    const old = {
+    await fs.writeFile(file, JSON.stringify(old), "utf-8");
+    store.__resetStore();
+    return store.getDb();
+  }
+
+  it("缺失字段的旧 db 可正常读取并补齐默认值", async () => {
+    const db = await writeLegacy({
       tasks: [],
       projects: [],
       areas: [],
       tags: [],
       weeklyReviews: [],
-      settings: {
-        defaultMode: "gtd",
-        kanbanWip: { todo: -1, doing: -1, done: -1, canceled: -1 },
-      },
-    };
-    await fs.writeFile(file, JSON.stringify(old), "utf-8");
-    store.__resetStore();
-    const db = await store.getDb();
+      settings: { defaultMode: "gtd", kanbanWip: { todo: -1 } },
+    });
+    expect(db.notes).toEqual([]);
     expect(db.habits).toEqual([]);
-    expect(db.habitChecks).toEqual([]);
-    expect(db.settings.automations.autoFlagOverdueFrog).toBe(false);
-    expect(db.settings.automations.autoClearFrogOnDone).toBe(true);
+    expect(db.settings.automations.autoClearPlanOnDone).toBe(true);
     expect(db.settings.automations.staleWaitingReminder).toBe(false);
     expect(db.settings.theme).toBe("system");
-    expect(db.settings.dayStartHour).toBe(8);
-    expect(db.settings.dayEndHour).toBe(22);
+    expect(db.settings.maxToday).toBe(6);
+    expect(db.settings.maxDoing).toBe(3);
+    expect(db.settings.staleDays).toBe(7);
     expect(db.weeklyReviewDraft).toEqual({ checklist: {}, notes: "" });
     expect(db.chatSummary).toBe("");
+  });
+
+  it("phase=reference 的旧任务迁移成笔记", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "r1",
+          title: "学习 VLLM",
+          notes: "PagedAttention",
+          phase: "reference",
+          status: "todo",
+          priority: 3,
+          tags: [],
+          projectId: null,
+          createdAt: "2026-08-20T19:21:32.661Z",
+          updatedAt: "2026-08-20T19:21:32.661Z",
+        },
+      ],
+    });
+    expect(db.tasks).toHaveLength(0);
+    expect(db.notes).toHaveLength(1);
+    expect(db.notes[0].content).toContain("学习 VLLM");
+    expect(db.notes[0].content).toContain("PagedAttention");
+    expect(db.notes[0].createdAt).toBe("2026-08-20T19:21:32.661Z");
+  });
+
+  it("旧的 isFrog 迁移为「今天做」，contexts/durationMinutes 被丢弃", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "f1",
+          title: "青蛙任务",
+          notes: "",
+          phase: "action",
+          status: "todo",
+          priority: 3,
+          isFrog: true,
+          contexts: ["ctx1"],
+          durationMinutes: 90,
+          tags: [],
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(db.tasks).toHaveLength(1);
+    expect(db.tasks[0].plannedFor).toBe(isoDay(new Date()));
+    expect(db.tasks[0]).not.toHaveProperty("isFrog");
+    expect(db.tasks[0]).not.toHaveProperty("contexts");
+    expect(db.tasks[0]).not.toHaveProperty("durationMinutes");
+    expect(db.tasks[0].nudgedAt).toBeNull();
+    expect(db.tasks[0].canceledReason).toBeNull();
+  });
+
+  it("旧的 autoClearFrogOnDone 迁移为 autoClearPlanOnDone", async () => {
+    const db = await writeLegacy({
+      tasks: [],
+      settings: { automations: { autoClearFrogOnDone: false, autoFlagOverdueFrog: true } },
+    });
+    expect(db.settings.automations.autoClearPlanOnDone).toBe(false);
+  });
+
+  it("从未自定义过的旧「战友」人格升级为「损友」", async () => {
+    const db = await writeLegacy({
+      tasks: [],
+      agentProfile: {
+        name: "马力",
+        personaId: "comrade",
+        custom: { role: [], tone: [], style: [], boundaries: [] },
+        updatedAt: "2026-08-20T18:44:06.398Z",
+      },
+    });
+    expect(db.agentProfile.personaId).toBe("roaster");
+    expect(db.agentProfile.name).toBe("马力");
+  });
+
+  it("用户改过自定义指令的人格原样保留，不被覆盖", async () => {
+    const db = await writeLegacy({
+      tasks: [],
+      agentProfile: {
+        name: "老马",
+        personaId: "comrade",
+        custom: { role: ["你是我的私人助理。"], tone: [], style: [], boundaries: [] },
+        updatedAt: "2026-08-20T18:44:06.398Z",
+      },
+    });
+    expect(db.agentProfile.personaId).toBe("comrade");
+    expect(db.agentProfile.name).toBe("老马");
+    expect(db.agentProfile.custom.role).toEqual(["你是我的私人助理。"]);
+  });
+
+  it("旧 db 没有 lastNudge / coachEnabled 时补默认值", async () => {
+    const db = await writeLegacy({ tasks: [] });
+    expect(db.lastNudge).toBeNull();
+    expect(db.settings.coachEnabled).toBe(true);
+  });
+
+  it("doing 任务缺 startedAt 时用 updatedAt 兜底", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "d1",
+          title: "在做的",
+          notes: "",
+          phase: "action",
+          status: "doing",
+          priority: 3,
+          tags: [],
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-05T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(db.tasks[0].startedAt).toBe("2025-01-05T00:00:00.000Z");
+  });
+});
+
+describe("清空数据", () => {
+  it("resetTaskData 清空任务与笔记，保留项目与设置", async () => {
+    await store.createProject("保留我");
+    await store.updateSettings({ maxToday: 4 });
+    await store.createTask({ title: "x" });
+    await store.createNote({ content: "n" });
+
+    const counts = await store.resetTaskData();
+    expect(counts).toEqual({ tasks: 1, notes: 1 });
+    expect(await store.listTasks()).toHaveLength(0);
+    expect(await store.listNotes()).toHaveLength(0);
+    expect(await store.listProjects()).toHaveLength(1);
+    expect((await store.getSettings()).maxToday).toBe(4);
+  });
+});
+
+describe("教练：一天最多一次", () => {
+  const nudge = {
+    id: "staleDoing:t1:2025-01-08",
+    kind: "staleDoing",
+    text: "它到底是在做，还是只是没被你正式承认已经放弃？",
+    day: "2025-01-08",
+    taskId: "t1",
+    dismissed: false,
+    createdAt: "2025-01-08T09:00:00.000Z",
+  };
+
+  it("默认没有，写入后可读回", async () => {
+    expect(await store.getLastNudge()).toBeNull();
+    await store.setLastNudge(nudge);
+    expect(await store.getLastNudge()).toMatchObject({ id: nudge.id, dismissed: false });
+  });
+
+  it("忽略后当天标记为 dismissed", async () => {
+    await store.setLastNudge(nudge);
+    const after = await store.dismissNudge(nudge.id);
+    expect(after!.dismissed).toBe(true);
+  });
+
+  it("忽略别的 id 不影响当前这条", async () => {
+    await store.setLastNudge(nudge);
+    const after = await store.dismissNudge("别的 id");
+    expect(after!.dismissed).toBe(false);
+  });
+
+  it("默认开启教练模式", async () => {
+    expect((await store.getSettings()).coachEnabled).toBe(true);
   });
 });
 
@@ -296,9 +584,14 @@ describe("活动历史", () => {
   it("关键字段更新追加历史", async () => {
     const t = await store.createTask({ title: "x", phase: "action" });
     await store.updateTask(t.id, { priority: 1 });
-    await store.updateTask(t.id, { isFrog: true });
+    await store.updateTask(t.id, { plannedFor: "2025-01-08" });
+    await store.updateTask(t.id, { plannedFor: null });
     const task = await store.getTask(t.id);
-    expect(task!.history.map((h) => h.label)).toEqual(["优先级设为 P1", "标记为青蛙"]);
+    expect(task!.history.map((h) => h.label)).toEqual([
+      "优先级设为 P1",
+      "承诺 2025-01-08 做",
+      "移出了今天",
+    ]);
   });
 
   it("历史条目最多保留 50 条", async () => {
@@ -323,19 +616,5 @@ describe("周回顾草稿", () => {
     await store.setWeeklyReviewDraft({ checklist: { a: true }, notes: "复盘" });
     await store.createWeeklyReview({ notes: "复盘", checklist: { a: true } });
     expect(await store.getWeeklyReviewDraft()).toEqual({ checklist: {}, notes: "" });
-  });
-});
-
-describe("durationMinutes 模型", () => {
-  it("默认 30 分钟", async () => {
-    const t = await store.createTask({ title: "x" });
-    expect(t.durationMinutes).toBe(30);
-  });
-
-  it("可通过 updateTask 调整", async () => {
-    const t = await store.createTask({ title: "x" });
-    const r = await store.updateTask(t.id, { durationMinutes: 90 });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.task.durationMinutes).toBe(90);
   });
 });

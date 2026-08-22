@@ -36,7 +36,7 @@ describe("tools 工具集", () => {
   });
 
   it("缺省 summary 时使用工具描述", () => {
-    const v = validateProposal({ tool: "mark_frog", args: { taskId: "x", isFrog: true } });
+    const v = validateProposal({ tool: "plan_today", args: { taskId: "x", day: "2025-01-08" } });
     expect(v).not.toBeNull();
     expect(v!.summary.length).toBeGreaterThan(0);
   });

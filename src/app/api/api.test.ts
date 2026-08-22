@@ -15,10 +15,10 @@ import { POST as postCheck } from "./habits/[id]/check/route";
 import { POST as runAutomationsRoute } from "./automations/run/route";
 import { GET as getAiStatus } from "./ai/status/route";
 import { POST as postAiBreakdown } from "./ai/breakdown/route";
-import { POST as postAiSchedule } from "./ai/schedule/route";
 import { GET as getAgentProfile, PATCH as patchAgentProfile } from "./agent/profile/route";
 import { GET as getAgentChat, POST as postAgentChat, DELETE as clearAgentChat } from "./agent/chat/route";
 import { POST as postAgentProposalStatus } from "./agent/proposals/route";
+import { GET as getNudge, POST as postNudgeDismiss } from "./agent/nudge/route";
 import { GET as exportRoute } from "./export/route";
 import { GET as getReviews, PATCH as patchReviewDraft } from "./reviews/route";
 
@@ -171,14 +171,25 @@ describe("API：依赖成环防护", () => {
 });
 
 describe("API：设置与项目归档", () => {
-  it("PATCH settings 更新看板 WIP", async () => {
+  it("PATCH settings 更新约束（今日上限 / WIP 上限 / 停滞阈值）", async () => {
     const res = await patchSettings(
-      jsonReq("/api/settings", { kanbanWip: { todo: 2, doing: 1, done: -1, canceled: -1 } }, "PATCH"),
+      jsonReq("/api/settings", { maxToday: 5, maxDoing: 2, staleDays: 14 }, "PATCH"),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.kanbanWip.todo).toBe(2);
-    expect(body.kanbanWip.done).toBe(-1);
+    expect(body.maxToday).toBe(5);
+    expect(body.maxDoing).toBe(2);
+    expect(body.staleDays).toBe(14);
+  });
+
+  it("PATCH settings 约束值越界时被夹紧", async () => {
+    const res = await patchSettings(
+      jsonReq("/api/settings", { maxToday: 999, maxDoing: 0, staleDays: -3 }, "PATCH"),
+    );
+    const body = await res.json();
+    expect(body.maxToday).toBe(20);
+    expect(body.maxDoing).toBe(1);
+    expect(body.staleDays).toBe(1);
   });
 
   it("PATCH 项目归档与恢复", async () => {
@@ -246,41 +257,36 @@ describe("API：习惯", () => {
 });
 
 describe("API：自动化", () => {
-  it("POST /api/automations/run 应用规则并返回任务", async () => {
-    await patchSettings(
-      jsonReq(
-        "/api/settings",
-        { automations: { autoFlagOverdueFrog: true, autoClearFrogOnDone: true, staleWaitingReminder: false } },
-        "PATCH",
-      ),
+  it("POST /api/automations/run 清除已结束任务的承诺日", async () => {
+    const t = await create({ title: "报告", phase: "action", plannedFor: "2025-01-08" });
+    await postTransition(
+      jsonReq(`/api/tasks/${t.id}/transition`, { type: "complete" }),
+      { params: Promise.resolve({ id: t.id as string }) },
     );
-    await create({ title: "报告", phase: "action", dueDate: "2020-01-01" });
+    // 完成时已自动清一次，这里再造一条「已完成但仍占额度」的脏数据
+    await patchTask(
+      jsonReq(`/api/tasks/${t.id}`, { plannedFor: "2025-01-08" }, "PATCH"),
+      { params: Promise.resolve({ id: t.id as string }) },
+    );
     const res = await runAutomationsRoute();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.applied).toBe(1);
-    expect(body.notifications.length).toBeGreaterThanOrEqual(1);
-    const task = body.tasks.find((t: { title: string }) => t.title === "报告");
-    expect(task.isFrog).toBe(true);
+    const task = body.tasks.find((x: { title: string }) => x.title === "报告");
+    expect(task.plannedFor).toBeNull();
   });
 
   it("PATCH settings 更新自动化开关", async () => {
     const res = await patchSettings(
       jsonReq(
         "/api/settings",
-        {
-          automations: {
-            autoFlagOverdueFrog: false,
-            autoClearFrogOnDone: true,
-            staleWaitingReminder: true,
-          },
-        },
+        { automations: { autoClearPlanOnDone: false, staleWaitingReminder: true } },
         "PATCH",
       ),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.automations.autoFlagOverdueFrog).toBe(false);
+    expect(body.automations.autoClearPlanOnDone).toBe(false);
     expect(body.automations.staleWaitingReminder).toBe(true);
   });
 });
@@ -330,55 +336,6 @@ describe("API：AI", () => {
     expect((await res.json()).titles).toEqual(["收集数据", "撰写初稿"]);
   });
 
-  it("schedule 未配置 → 启发式降级", async () => {
-    delete process.env.AI_API_KEY;
-    await create({ title: "任务", phase: "action" });
-    const res = await postAiSchedule();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe("heuristic");
-    expect(body.suggestions).toHaveLength(1);
-  });
-
-  it("schedule 配置 key + mock fetch → source=ai", async () => {
-    process.env.AI_API_KEY = "sk-test";
-    const t = await create({ title: "任务", phase: "action" });
-    // 与服务端一致的「本周一」，保证建议落在合法日期范围
-    const now = new Date();
-    const d = new Date(now);
-    d.setHours(0, 0, 0, 0);
-    const day = d.getDay();
-    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-    // 与服务端 isoDay 一致：用本地日期分量，避免时区偏移
-    const mondayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    suggestions: [{ taskId: t.id, date: mondayStr, hour: 9 }],
-                  }),
-                },
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
-    );
-    const res = await postAiSchedule();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe("ai");
-    expect(body.suggestions).toHaveLength(1);
-    expect(body.suggestions[0].taskId).toBe(t.id);
-  });
 });
 
 describe("API：马力 Agent", () => {
@@ -387,7 +344,7 @@ describe("API：马力 Agent", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.name).toBe("马力");
-    expect(body.personaId).toBe("comrade");
+    expect(body.personaId).toBe("roaster");
     expect(Array.isArray(body.custom.role)).toBe(true);
   });
 
@@ -479,7 +436,7 @@ describe("API：马力 Agent", () => {
   it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockAgentFetch(["建议完成这个任务。"], [
-      { tool: "mark_frog", args: { taskId: "t1", isFrog: true }, summary: "标记青蛙" },
+      { tool: "plan_today", args: { taskId: "t1", day: "2025-01-08" }, summary: "放进今天" },
     ]);
     const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
     const done = await parseSseDone(res);
@@ -521,7 +478,59 @@ describe("API：马力 Agent", () => {
   });
 });
 
-describe("API：导出 / 周回顾草稿 / 时段设置 / durationMinutes", () => {
+describe("API：教练层（罕见 / 一天一次 / 可关）", () => {
+  it("系统健康时不说话（与运行时刻无关）", async () => {
+    // start 会把任务放进今天并进入在制：既不是「今天空着」也不是「一件没动」
+    const t = await create({ title: "正常", phase: "action" });
+    await postTransition(
+      jsonReq(`/api/tasks/${t.id}/transition`, { type: "start" }),
+      { params: Promise.resolve({ id: t.id as string }) },
+    );
+    const body = await (await getNudge()).json();
+    expect(body.nudge).toBeNull();
+  });
+
+  it("关掉教练模式后一律不说话", async () => {
+    await patchSettings(jsonReq("/api/settings", { coachEnabled: false }, "PATCH"));
+    for (let i = 0; i < 12; i++) await create({ title: `i${i}` }); // 收件箱堆积
+    const body = await (await getNudge()).json();
+    expect(body.nudge).toBeNull();
+  });
+
+  it("有模式成立时说一句，且当天重复请求复用同一条", async () => {
+    delete process.env.AI_API_KEY; // 未配置 AI → 用内置兜底文案
+    for (let i = 0; i < 12; i++) await create({ title: `i${i}` });
+
+    const first = (await (await getNudge()).json()).nudge;
+    expect(first).not.toBeNull();
+    expect(first.kind).toBe("inboxPileup");
+    expect(first.text.length).toBeGreaterThan(0);
+    expect(first.dismissed).toBe(false);
+
+    const second = (await (await getNudge()).json()).nudge;
+    expect(second.id).toBe(first.id);
+    expect(second.createdAt).toBe(first.createdAt); // 没有重新生成
+  });
+
+  it("忽略之后当天闭嘴", async () => {
+    delete process.env.AI_API_KEY;
+    for (let i = 0; i < 12; i++) await create({ title: `i${i}` });
+    const nudge = (await (await getNudge()).json()).nudge;
+
+    const dismissed = await postNudgeDismiss(jsonReq("/api/agent/nudge", { id: nudge.id }));
+    expect(dismissed.status).toBe(200);
+    expect((await dismissed.json()).nudge.dismissed).toBe(true);
+
+    expect((await (await getNudge()).json()).nudge).toBeNull();
+  });
+
+  it("忽略请求缺 id 返回 400", async () => {
+    const res = await postNudgeDismiss(jsonReq("/api/agent/nudge", {}));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("API：导出 / 周回顾草稿 / 承诺日", () => {
   it("export json/csv/md 内容与未知格式 400", async () => {
     await create({ title: "导出我", phase: "action" });
 
@@ -559,29 +568,25 @@ describe("API：导出 / 周回顾草稿 / 时段设置 / durationMinutes", () =
     expect(again.draft.checklist).toEqual({ a: true });
   });
 
-  it("settings PATCH 时段与非法值", async () => {
-    const ok = await patchSettings(
-      jsonReq("/api/settings", { dayStartHour: 7, dayEndHour: 21 }, "PATCH"),
-    );
-    expect(ok.status).toBe(200);
-    const body = await ok.json();
-    expect(body.dayStartHour).toBe(7);
-    expect(body.dayEndHour).toBe(21);
-  });
-
-  it("PATCH durationMinutes 校验边界（5 拒绝 / 90 通过）", async () => {
-    const t = await create({ title: "时长任务", phase: "action" });
+  it("PATCH plannedFor 校验日期格式（非法拒绝 / 合法通过 / null 清除）", async () => {
+    const t = await create({ title: "承诺任务", phase: "action" });
     const bad = await patchTask(
-      jsonReq(`/api/tasks/${t.id}`, { durationMinutes: 5 }, "PATCH"),
+      jsonReq(`/api/tasks/${t.id}`, { plannedFor: "明天" }, "PATCH"),
       { params: Promise.resolve({ id: t.id as string }) },
     );
     expect(bad.status).toBe(400);
 
     const good = await patchTask(
-      jsonReq(`/api/tasks/${t.id}`, { durationMinutes: 90 }, "PATCH"),
+      jsonReq(`/api/tasks/${t.id}`, { plannedFor: "2025-01-08" }, "PATCH"),
       { params: Promise.resolve({ id: t.id as string }) },
     );
     expect(good.status).toBe(200);
-    expect((await good.json()).durationMinutes).toBe(90);
+    expect((await good.json()).plannedFor).toBe("2025-01-08");
+
+    const cleared = await patchTask(
+      jsonReq(`/api/tasks/${t.id}`, { plannedFor: null }, "PATCH"),
+      { params: Promise.resolve({ id: t.id as string }) },
+    );
+    expect((await cleared.json()).plannedFor).toBeNull();
   });
 });

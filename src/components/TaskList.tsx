@@ -2,26 +2,28 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
-import { blockedIdSet } from "@/lib/engine/selectors";
+import { blockedIdSet, isoDay } from "@/lib/engine/selectors";
 import { useTaskMeta } from "@/lib/client/useTaskMeta";
 import { toastError, useToast } from "@/store/useToast";
 import type { Task } from "@/lib/domain/types";
 import { TaskItem } from "./TaskItem";
 
 export function TaskList({
-  title,
   tasks,
   onSelect,
   emptyText,
-  showFrog = false,
+  emptyHint,
+  emptyAction,
+  showPlan = false,
   groupBy,
   renderItem,
 }: {
-  title: string;
   tasks: Task[];
   onSelect: (id: string) => void;
   emptyText: string;
-  showFrog?: boolean;
+  emptyHint?: string;
+  emptyAction?: React.ReactNode;
+  showPlan?: boolean;
   groupBy?: (task: Task) => string;
   renderItem?: (task: Task) => React.ReactNode;
 }) {
@@ -29,6 +31,7 @@ export function TaskList({
   const allTasks = useStore((s) => s.tasks);
   const transition = useStore((s) => s.transition);
   const updateTask = useStore((s) => s.updateTask);
+  const planTask = useStore((s) => s.planTask);
   const blockedIds = useMemo(() => blockedIdSet(allTasks), [allTasks]);
   const completedFx = useToast((s) => s.completedFx);
 
@@ -37,13 +40,11 @@ export function TaskList({
     () =>
       Object.keys(completedFx)
         .map((id) => allTasks.find((t) => t.id === id))
-        .filter(
-          (t): t is Task => t !== undefined && !tasks.some((x) => x.id === t.id),
-        ),
+        .filter((t): t is Task => t !== undefined && !tasks.some((x) => x.id === t.id)),
     [completedFx, allTasks, tasks],
   );
 
-  // 键盘导航（↑↓ 选中 / Enter 打开 / Space 完成 / 1-4 优先级）
+  // 键盘导航（↑↓ 选中 / Enter 打开 / Space 完成 / T 放进今天 / 1-4 优先级）
   const flatRef = useRef(tasks);
   flatRef.current = tasks;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -67,9 +68,11 @@ export function TaskList({
       ) {
         return;
       }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const list = flatRef.current;
       if (list.length === 0) return;
       const idx = list.findIndex((t) => t.id === selectedId);
+      const current = list[idx];
       if (e.key === "ArrowDown") {
         e.preventDefault();
         const next = list[Math.min(idx + 1, list.length - 1)];
@@ -80,26 +83,32 @@ export function TaskList({
         if (prev) setSelectedId(prev.id);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (idx >= 0) onSelect(list[idx].id);
+        if (current) onSelect(current.id);
       } else if (e.key === " ") {
         e.preventDefault();
-        const t = list[idx];
-        if (t) {
+        if (current) {
           transition(
-            t.id,
-            t.status === "done" ? { type: "reopen" } : { type: "complete" },
+            current.id,
+            current.status === "done" ? { type: "reopen" } : { type: "complete" },
           ).catch((err) => toastError(err));
         }
+      } else if (e.key.toLowerCase() === "t") {
+        if (current && current.phase === "action") {
+          e.preventDefault();
+          const today = isoDay(new Date());
+          planTask(current.id, current.plannedFor === today ? null : today).catch((err) =>
+            toastError(err),
+          );
+        }
       } else if (["1", "2", "3", "4"].includes(e.key)) {
-        const t = list[idx];
-        if (t) {
-          updateTask(t.id, { priority: Number(e.key) }).catch((err) => toastError(err));
+        if (current) {
+          updateTask(current.id, { priority: Number(e.key) }).catch((err) => toastError(err));
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, onSelect, transition, updateTask]);
+  }, [selectedId, onSelect, transition, updateTask, planTask]);
 
   const defaultRenderItem = (t: Task) => (
     <div className={selectedId === t.id ? "rounded-lg ring-1 ring-primary/50" : ""}>
@@ -108,7 +117,7 @@ export function TaskList({
         meta={meta}
         blocked={blockedIds.has(t.id)}
         onSelect={onSelect}
-        showFrog={showFrog}
+        showPlan={showPlan}
       />
     </div>
   );
@@ -118,12 +127,7 @@ export function TaskList({
   );
 
   if (tasks.length === 0 && fxTasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-        <div className="text-3xl mb-2">🗂</div>
-        <p className="text-sm">{emptyText}</p>
-      </div>
-    );
+    return <EmptyState text={emptyText} hint={emptyHint} action={emptyAction} />;
   }
 
   if (!groupBy) {
@@ -152,9 +156,26 @@ export function TaskList({
           <div className="space-y-1.5">{list.map(renderRow)}</div>
         </section>
       ))}
-      {fxTasks.length > 0 ? (
-        <div className="space-y-1.5">{fxTasks.map(renderRow)}</div>
-      ) : null}
+      {fxTasks.length > 0 ? <div className="space-y-1.5">{fxTasks.map(renderRow)}</div> : null}
+    </div>
+  );
+}
+
+/** 空状态是教学时机：一句解释 + 一个下一步动作 */
+export function EmptyState({
+  text,
+  hint,
+  action,
+}: {
+  text: string;
+  hint?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-16 text-center">
+      <p className="text-sm font-medium">{text}</p>
+      {hint ? <p className="mt-1 max-w-sm text-xs text-muted-foreground">{hint}</p> : null}
+      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );
 }
@@ -169,10 +190,10 @@ export function PageHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex items-end justify-between">
-      <div>
+    <div className="mb-5 flex items-end justify-between gap-4">
+      <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {subtitle ? <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p> : null}
       </div>
       {children}
     </div>

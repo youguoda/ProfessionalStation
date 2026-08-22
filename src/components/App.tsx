@@ -5,8 +5,11 @@ import { useStore } from "@/store/useStore";
 import { Sidebar } from "./Sidebar";
 import { CaptureBar } from "./CaptureBar";
 import { ListView } from "./ListView";
+import { ClarifyView } from "./ClarifyView";
+import { TodayView } from "./TodayView";
+import { DoingView } from "./DoingView";
+import { NotesView } from "./NotesView";
 import { WeeklyReviewView } from "./WeeklyReviewView";
-import { ParaView } from "./ParaView";
 import { HabitsView } from "./HabitsView";
 import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
@@ -17,6 +20,7 @@ import { CommandPalette } from "./CommandPalette";
 import { LogView } from "./LogView";
 import { ProjectDetailView } from "./ProjectDetailView";
 import { SettingsView } from "./SettingsView";
+import { CoachBar } from "./CoachBar";
 import { triggerUndo } from "@/store/useToast";
 import { checkReminders } from "@/lib/client/reminders";
 
@@ -71,7 +75,7 @@ export function App() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <p className="text-3xl mb-3">⚠️</p>
+          <p className="mb-3 text-3xl">⚠️</p>
           <p className="text-destructive">{error}</p>
           <button
             onClick={() => load()}
@@ -92,19 +96,36 @@ export function App() {
     );
   }
 
-  // 任务范围：固定列表视图（看板/四象限/时间块模式按钮已移除）
+  /**
+   * 导航即生命周期：处理（收件箱→今天→进行中→等待）→ 库存 → 组织 → 结算。
+   * 每个范围只有一种正确的展示方式，所以不再有「视图模式」这个选择。
+   */
   function MainContent() {
-    if (scope === "habits") return <HabitsView />;
-    if (scope === "review") return <WeeklyReviewView />;
-    if (scope === "automation") return <AutomationView />;
-    if (scope === "settings") return <SettingsView />;
-    if (scope === "log") return <LogView onSelect={openTask} />;
-    if (scope === "para") return <ParaView onSelect={openTask} />;
+    switch (scope) {
+      case "inbox":
+        return <ClarifyView onSelect={openTask} />;
+      case "today":
+        return <TodayView onSelect={openTask} />;
+      case "doing":
+        return <DoingView onSelect={openTask} />;
+      case "notes":
+        return <NotesView />;
+      case "habits":
+        return <HabitsView />;
+      case "review":
+        return <WeeklyReviewView onSelect={openTask} />;
+      case "automation":
+        return <AutomationView />;
+      case "settings":
+        return <SettingsView />;
+      case "log":
+        return <LogView onSelect={openTask} />;
+      default:
+        break;
+    }
     if (scope.startsWith("project:")) {
       return <ProjectDetailView projectId={scope.slice("project:".length)} onSelect={openTask} />;
     }
-    if (scope.startsWith("area:")) return <ListView scope={scope} onSelect={openTask} />;
-
     return <ListView scope={scope} onSelect={openTask} />;
   }
 
@@ -115,6 +136,7 @@ export function App() {
         <CaptureBar />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-4xl">
+            <CoachBar />
             <MainContent />
           </div>
         </main>

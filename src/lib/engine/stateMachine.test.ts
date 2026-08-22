@@ -15,7 +15,10 @@ describe("createTask 默认值", () => {
     expect(t.repeatRule).toBeNull();
     expect(t.waitingFor).toBeNull();
     expect(t.tags).toEqual([]);
-    expect(t.contexts).toEqual([]);
+    expect(t.plannedFor).toBeNull();
+    expect(t.startedAt).toBeNull();
+    expect(t.canceledReason).toBeNull();
+    expect(t.nudgedAt).toBeNull();
   });
 });
 
@@ -29,8 +32,8 @@ describe("状态机：澄清 phase 迁移", () => {
     }
   });
 
-  it("收件箱可澄清为 waiting / someday / reference", () => {
-    for (const target of ["waiting", "someday", "reference"] as const) {
+  it("收件箱可澄清为 waiting / someday", () => {
+    for (const target of ["waiting", "someday"] as const) {
       const r = transition(createTask({ title: "x" }), { type: "clarify", target });
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.task.phase).toBe(target);
@@ -52,10 +55,30 @@ describe("状态机：澄清 phase 迁移", () => {
 });
 
 describe("状态机：执行 status 迁移", () => {
-  it("action 可 start 进入 doing", () => {
+  it("action 可 start 进入 doing，并记录 startedAt", () => {
     const r = transition(createTask({ title: "x", phase: "action" }), { type: "start" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.task.status).toBe("doing");
+    if (r.ok) {
+      expect(r.task.status).toBe("doing");
+      expect(r.task.startedAt).not.toBeNull();
+    }
+  });
+
+  it("doing 可 stop 放回待办，并清除 startedAt", () => {
+    const doing = createTask({ title: "x", phase: "action", status: "doing" });
+    doing.startedAt = "2025-01-01T00:00:00.000Z";
+    const r = transition(doing, { type: "stop" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.status).toBe("todo");
+      expect(r.task.startedAt).toBeNull();
+    }
+  });
+
+  it("非 doing 不能 stop", () => {
+    expect(
+      transition(createTask({ title: "x", phase: "action", status: "todo" }), { type: "stop" }).ok,
+    ).toBe(false);
   });
 
   it("非 action 不能 start", () => {
@@ -85,8 +108,10 @@ describe("状态机：执行 status 迁移", () => {
     if (r.ok) expect(r.task.status).toBe("done");
   });
 
-  it("reference 不能 complete", () => {
-    expect(transition(createTask({ title: "x", phase: "reference" }), { type: "complete" }).ok).toBe(false);
+  it("someday 不能直接 complete（先提到下一步）", () => {
+    expect(
+      transition(createTask({ title: "x", phase: "someday" }), { type: "complete" }).ok,
+    ).toBe(false);
   });
 
   it("已完成的任务不能重复 complete", () => {
@@ -121,51 +146,63 @@ describe("状态机：执行 status 迁移", () => {
     expect(transition(createTask({ title: "x", phase: "action", status: "todo" }), { type: "reopen" }).ok).toBe(false);
   });
 
-  it("todo/doing 可 cancel", () => {
+  it("todo/doing 可 cancel，并写入 completedAt（取消也是终局）", () => {
     for (const status of ["todo", "doing"] as const) {
       const r = transition(createTask({ title: "x", phase: "action", status }), { type: "cancel" });
       expect(r.ok).toBe(true);
-      if (r.ok) expect(r.task.status).toBe("canceled");
+      if (r.ok) {
+        expect(r.task.status).toBe("canceled");
+        expect(r.task.completedAt).not.toBeNull();
+      }
     }
+  });
+
+  it("cancel 可记录原因，空白原因归一化为 null", () => {
+    const withReason = transition(createTask({ title: "x", phase: "action" }), {
+      type: "cancel",
+      reason: "  需求砍掉了  ",
+    });
+    expect(withReason.ok).toBe(true);
+    if (withReason.ok) expect(withReason.task.canceledReason).toBe("需求砍掉了");
+
+    const blank = transition(createTask({ title: "x", phase: "action" }), {
+      type: "cancel",
+      reason: "   ",
+    });
+    expect(blank.ok).toBe(true);
+    if (blank.ok) expect(blank.task.canceledReason).toBeNull();
+  });
+
+  it("reopen 会清除取消原因", () => {
+    const canceled = createTask({ title: "x", phase: "action", status: "canceled" });
+    canceled.canceledReason = "不做了";
+    const r = transition(canceled, { type: "reopen" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.canceledReason).toBeNull();
   });
 
   it("done 不能 cancel", () => {
     expect(transition(createTask({ title: "x", phase: "action", status: "done" }), { type: "cancel" }).ok).toBe(false);
   });
-});
 
-describe("状态机：setStatus（看板拖拽）", () => {
-  it("action 任务可移动到 done，写入 completedAt", () => {
-    const r = transition(createTask({ title: "x", phase: "action" }), { type: "setStatus", status: "done" });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.task.status).toBe("done");
-      expect(r.task.completedAt).not.toBeNull();
-    }
-  });
-
-  it("setStatus 回 todo 会清除 completedAt", () => {
-    const done = createTask({
-      title: "x",
-      phase: "action",
-      status: "done",
-      completedAt: "2025-01-01T00:00:00.000Z",
-    });
-    const r = transition(done, { type: "setStatus", status: "todo" });
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.task.completedAt).toBeNull();
-  });
-
-  it("非 action 任务不能 setStatus", () => {
-    expect(transition(createTask({ title: "x" }), { type: "setStatus", status: "doing" }).ok).toBe(false);
+  it("已取消的任务不能重复 cancel", () => {
+    expect(
+      transition(createTask({ title: "x", phase: "action", status: "canceled" }), {
+        type: "cancel",
+      }).ok,
+    ).toBe(false);
   });
 });
 
 describe("状态机：trash / restore", () => {
-  it("任意阶段可 trash", () => {
-    const r = transition(createTask({ title: "x", phase: "action" }), { type: "trash" });
+  it("任意阶段可 trash，并释放今天的额度", () => {
+    const t = createTask({ title: "x", phase: "action", plannedFor: "2025-01-08" });
+    const r = transition(t, { type: "trash" });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.task.phase).toBe("trash");
+    if (r.ok) {
+      expect(r.task.phase).toBe("trash");
+      expect(r.task.plannedFor).toBeNull();
+    }
   });
 
   it("trash 不可重复 trash", () => {

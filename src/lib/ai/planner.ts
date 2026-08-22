@@ -1,14 +1,12 @@
 /**
  * AI 规划模块（仅服务端使用，勿在客户端组件中导入）。
  *
- * 通过 OpenAI 兼容接口（默认 DeepSeek）驱动「任务拆分」与「智能排期」：
- *   - 未配置 AI_API_KEY 时，排期自动降级为本地启发式；
- *   - LLM 调用失败或返回非法结果时同样降级，保证功能永远可用。
+ * 通过 OpenAI 兼容接口（默认 DeepSeek）驱动「任务拆分」。
+ * 未配置 AI_API_KEY 或调用失败时由调用方降级，保证功能永远可用。
+ *
+ * 注：自动排期已随时间块视图一并移除——scheduledAt 现在只表示
+ * 「固定时刻」（hard landscape），不该由算法批量填充。
  */
-
-import type { Task } from "@/lib/domain/types";
-import { isoDay } from "@/lib/engine/selectors";
-import { suggestSchedule, type SlotSuggestion } from "@/lib/engine/scheduler";
 
 export interface AiConfig {
   enabled: boolean;
@@ -30,11 +28,18 @@ export async function chatJson(prompt: string, system?: string): Promise<string>
   return chatWithMessages([{ role: "user", content: prompt }], system, 0.2);
 }
 
-/** 多轮消息调用（system + 历史消息），返回消息内容 */
+/**
+ * 多轮消息调用（system + 历史消息），返回消息内容。
+ *
+ * format 默认 "json"（结构化路径：拆分/建议/记忆提炼）。
+ * 需要**纯文本**输出时必须传 "text"——否则 OpenAI 兼容端点会强制 JSON 包一层，
+ * 而且 DeepSeek 在 json_object 模式下若 prompt 未出现 "json" 会直接返回 400。
+ */
 export async function chatWithMessages(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   system?: string,
   temperature = 0.7,
+  format: "json" | "text" = "json",
 ): Promise<string> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
@@ -49,12 +54,16 @@ export async function chatWithMessages(
       messages: [
         {
           role: "system",
-          content: system ?? "你是一个任务管理助手。只输出合法 JSON，不要输出任何多余文字或代码块。",
+          content:
+            system ??
+            (format === "json"
+              ? "你是一个任务管理助手。只输出合法 JSON，不要输出任何多余文字或代码块。"
+              : "你是一个任务管理助手。"),
         },
         ...messages,
       ],
       temperature,
-      response_format: { type: "json_object" },
+      ...(format === "json" ? { response_format: { type: "json_object" } } : {}),
     }),
   });
   if (!res.ok) {
@@ -171,94 +180,4 @@ export async function aiBreakdown(title: string, notes: string): Promise<string[
     : [];
   if (titles.length === 0) throw new Error("AI 未返回有效的子任务清单");
   return titles;
-}
-
-export interface RawAiSuggestion {
-  taskId?: unknown;
-  date?: unknown;
-  hour?: unknown;
-}
-
-/**
- * 校验 LLM 返回的排期建议（纯函数）：
- * 只保留合法条目——taskId 是候选任务且不重复、date 在本周、hour 在可选时段、每天不超 maxPerDay。
- */
-export function validateAiSchedule(
-  raw: unknown,
-  candidates: Task[],
-  days: string[],
-  hours: number[],
-  maxPerDay: number,
-): SlotSuggestion[] {
-  if (!Array.isArray(raw)) return [];
-  const candidateIds = new Set(candidates.map((t) => t.id));
-  const daySet = new Set(days);
-  const hourSet = new Set(hours);
-  const perDay = new Map<string, number>();
-  const seen = new Set<string>();
-  const result: SlotSuggestion[] = [];
-
-  for (const item of raw as RawAiSuggestion[]) {
-    if (!item || typeof item !== "object") continue;
-    const taskId = typeof item.taskId === "string" ? item.taskId : "";
-    const date = typeof item.date === "string" ? item.date : "";
-    const hour = typeof item.hour === "number" ? item.hour : NaN;
-    if (!candidateIds.has(taskId) || seen.has(taskId)) continue;
-    if (!daySet.has(date) || !hourSet.has(hour)) continue;
-    if ((perDay.get(date) ?? 0) >= maxPerDay) continue;
-    seen.add(taskId);
-    perDay.set(date, (perDay.get(date) ?? 0) + 1);
-    result.push({
-      taskId,
-      scheduledAt: `${date}T${String(hour).padStart(2, "0")}:00:00`,
-    });
-  }
-  return result;
-}
-
-export interface AiScheduleResult {
-  suggestions: SlotSuggestion[];
-  source: "ai" | "heuristic";
-}
-
-/** AI 排期：未配置/失败/结果非法时降级到启发式 */
-export async function aiSchedule(
-  tasks: Task[],
-  weekStart: Date,
-  opts: { hours?: number[]; maxPerDay?: number; includeWeekend?: boolean } = {},
-): Promise<AiScheduleResult> {
-  const heuristic = (): AiScheduleResult => ({
-    suggestions: suggestSchedule(tasks, weekStart, opts),
-    source: "heuristic",
-  });
-
-  if (!getAiConfig().enabled) return heuristic();
-
-  const hours = opts.hours ?? [9, 10, 11, 14, 15, 16, 17];
-  const maxPerDay = opts.maxPerDay ?? 3;
-  const dayCount = opts.includeWeekend ? 7 : 5;
-  const candidates = tasks.filter(
-    (t) => t.phase === "action" && t.status !== "done" && t.status !== "canceled" && !t.scheduledAt,
-  );
-  if (candidates.length === 0) return { suggestions: [], source: "ai" };
-
-  const days = Array.from({ length: dayCount }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + i);
-    return isoDay(d);
-  });
-
-  try {
-    const list = candidates
-      .map((t) => `- id=${t.id} 标题=${t.title} 优先级=P${t.priority} 努力值=${t.effort ?? "未评估"}`)
-      .join("\n");
-    const content = await chatJson(
-      `请为下面这些任务安排一周内的时间块。可选日期：${days.join("、")}；可选小时：${hours.join(" 点、")} 点；每天最多 ${maxPerDay} 个任务。\n优先把高优先级、高努力值的任务安排在早晨。\n候选任务：\n${list}\n\n输出 JSON 格式：{"suggestions":[{"taskId":"...","date":"YYYY-MM-DD","hour":9}]}`,
-    );
-    const parsed = parseJsonLoose(content) as { suggestions?: unknown } | null;
-    const suggestions = validateAiSchedule(parsed?.suggestions, candidates, days, hours, maxPerDay);
-    return suggestions.length > 0 ? { suggestions, source: "ai" } : heuristic();
-  } catch {
-    return heuristic();
-  }
 }

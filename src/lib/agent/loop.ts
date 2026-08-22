@@ -126,6 +126,71 @@ export async function proposeAgentActions(
   }
 }
 
+/**
+ * 教练层的「开口」环节：把一条客观观察，用人格说成一句话。
+ * AI 未配置或调用失败时返回 null，由调用方降级到 observer 的本地兜底文案。
+ */
+export async function generateNudge(input: {
+  profile: AgentProfile;
+  evidence: string;
+  context: string;
+  memoryNotes: MemoryNote[];
+}): Promise<string | null> {
+  if (!getAiConfig().enabled) return null;
+  try {
+    const system = assembleSystemPrompt(
+      input.profile,
+      input.context,
+      "",
+      memoryTextOf(input.memoryNotes, input.evidence),
+      "nudge",
+      "",
+    );
+    const content = await chatWithMessages(
+      [
+        {
+          role: "user",
+          content: `你刚刚注意到：${input.evidence}\n\n用户没有问你任何问题。说一句话。`,
+        },
+      ],
+      system,
+      0.9, // 毒舌需要一点温度
+      "text", // 一句话，不要被 JSON 包一层
+    );
+    return sanitizeNudge(content);
+  } catch {
+    return null;
+  }
+}
+
+/** 一句话就是一句话：去掉换行/引号/前缀，超长截断 */
+export function sanitizeNudge(raw: string, maxLen = 80): string | null {
+  let s = raw.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  // 防御：个别模型仍会把一句话包进 {"reply": "..."}
+  if (s.startsWith("{")) {
+    try {
+      const obj = JSON.parse(s) as Record<string, unknown>;
+      const inner = obj.reply ?? obj.text ?? obj.content ?? obj.message;
+      if (typeof inner === "string") s = inner.trim();
+    } catch {
+      /* 不是合法 JSON 就按原样处理 */
+    }
+  }
+  s = s.replace(/^[「"'“”\s]+|[」"'“”\s]+$/g, "").trim();
+  s = s.replace(/^(马力[：:]\s*|回复[：:]\s*)/, "").trim();
+  if (!s) return null;
+  if (s.length > maxLen) {
+    const cut = s.slice(0, maxLen);
+    const stop = Math.max(
+      cut.lastIndexOf("。"),
+      cut.lastIndexOf("？"),
+      cut.lastIndexOf("！"),
+    );
+    s = stop > maxLen * 0.5 ? cut.slice(0, stop + 1) : cut + "…";
+  }
+  return s;
+}
+
 /** 非流式兼容路径（chat 模式：一次调用输出 reply + proposals JSON） */
 export async function runAgentTurn(input: {
   profile: AgentProfile;

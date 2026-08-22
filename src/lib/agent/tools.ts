@@ -58,12 +58,12 @@ export const AGENT_TOOLS: ToolDef[] = [
     }),
   },
   {
-    name: "mark_frog",
-    description: "把任务标记为（或取消）今日青蛙",
-    params: "{taskId: string, isFrog: boolean}",
+    name: "plan_today",
+    description: "把任务放进（或移出）某天的承诺清单",
+    params: "{taskId: string, day: string(YYYY-MM-DD)|null}",
     zod: z.object({
       taskId: z.string().min(1),
-      isFrog: z.boolean(),
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
     }),
   },
   {
@@ -107,8 +107,10 @@ export function proposalLabel(p: ParsedProposal): string {
       return `调整任务 #${String(p.args.taskId ?? "")} 的时间`;
     case "set_priority":
       return `把任务 #${String(p.args.taskId ?? "")} 设为 P${String(p.args.priority ?? "")}`;
-    case "mark_frog":
-      return p.args.isFrog ? `把任务 #${String(p.args.taskId ?? "")} 标记为青蛙` : `取消任务 #${String(p.args.taskId ?? "")} 的青蛙标记`;
+    case "plan_today":
+      return p.args.day
+        ? `把任务 #${String(p.args.taskId ?? "")} 放进 ${String(p.args.day)} 的清单`
+        : `把任务 #${String(p.args.taskId ?? "")} 移出今天`;
     case "add_note":
       return `给任务 #${String(p.args.taskId ?? "")} 追加备注`;
     default:

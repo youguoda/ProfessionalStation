@@ -9,8 +9,7 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = await req.json();
   const name = typeof body?.name === "string" ? body.name.trim() : "";
-  const kind = body?.kind === "context" ? "context" : "tag";
   if (!name) return NextResponse.json({ error: "标签名不能为空" }, { status: 400 });
-  const tag = await getOrCreateTag(name, kind);
+  const tag = await getOrCreateTag(name);
   return NextResponse.json(tag, { status: 201 });
 }
