@@ -12,14 +12,19 @@ export interface AiConfig {
   enabled: boolean;
   baseUrl: string;
   model: string;
+  jsonMode: boolean;
 }
 
 export function getAiConfig(): AiConfig {
   const apiKey = process.env.AI_API_KEY;
+  const jsonModeRaw = process.env.AI_JSON_MODE;
   return {
     enabled: Boolean(apiKey),
     baseUrl: (process.env.AI_BASE_URL ?? "https://api.deepseek.com/v1").replace(/\/+$/, ""),
     model: process.env.AI_MODEL ?? "deepseek-chat",
+    // 不少自建/内网的 OpenAI 兼容端点不认 response_format，会直接 400。
+    // 置 AI_JSON_MODE=0 关掉它：改由 system 提示词要求 JSON，parseJsonLoose 兜底。
+    jsonMode: jsonModeRaw !== "0" && jsonModeRaw !== "false",
   };
 }
 
@@ -63,7 +68,9 @@ export async function chatWithMessages(
         ...messages,
       ],
       temperature,
-      ...(format === "json" ? { response_format: { type: "json_object" } } : {}),
+      ...(format === "json" && cfg.jsonMode
+        ? { response_format: { type: "json_object" } }
+        : {}),
     }),
   });
   if (!res.ok) {

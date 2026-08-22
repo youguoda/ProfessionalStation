@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ProfessionalStation · 任务计划",
-  description: "一个方法无关的任务计划网站：GTD / 看板 / 四象限 / PARA 多工作流可切换。",
+  description: "一个给单个使用者的任务系统：把方法论做成约束，而不是做成视图。",
 };
 
 export default function RootLayout({

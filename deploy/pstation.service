@@ -1,0 +1,41 @@
+# /etc/systemd/system/pstation.service
+#
+#   sudo cp deploy/pstation.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pstation
+
+[Unit]
+Description=ProfessionalStation
+After=network.target
+
+[Service]
+Type=simple
+User=guoda
+WorkingDirectory=/opt/professional-station
+
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# 必须指到仓库外面：默认的 .data/ 在代码目录里，git clean / 重新 clone 就没了
+Environment=DATA_DIR=/var/lib/professional-station
+# 内网 AI 端点用自签证书时打开这行，否则 Node 的 fetch 会直接拒连
+# Environment=NODE_EXTRA_CA_CERTS=/etc/ssl/certs/corp-ca.pem
+
+# AI_API_KEY / AI_BASE_URL / AI_MODEL / AI_JSON_MODE 放这里，权限 600
+EnvironmentFile=-/etc/professional-station.env
+
+# 绕开 npm 直接跑 node：npm 会吞掉 SIGTERM，害 systemctl stop 每次都等超时
+# -H 127.0.0.1 = 只听回环，进出一律走 Nginx（这个应用没有任何身份校验）
+ExecStart=/usr/bin/node /opt/professional-station/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+
+Restart=always
+RestartSec=5
+
+# 数据只有一个 JSON 文件，收紧一点不费事
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/professional-station
+
+[Install]
+WantedBy=multi-user.target

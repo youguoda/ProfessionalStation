@@ -112,6 +112,8 @@ export async function POST(req: Request) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // 反代（Nginx）默认会缓冲响应，打字机会变成「等半天，然后一次性蹦出来」
+      "X-Accel-Buffering": "no",
     },
   });
 }

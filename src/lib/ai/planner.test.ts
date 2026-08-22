@@ -128,6 +128,7 @@ describe("chatWithMessages 的输出格式开关", () => {
 
   beforeEach(() => {
     process.env.AI_API_KEY = "sk-test";
+    delete process.env.AI_JSON_MODE;
   });
 
   it("默认 json 模式带 response_format（结构化路径依赖它）", async () => {
@@ -142,5 +143,14 @@ describe("chatWithMessages 的输出格式开关", () => {
     expect(bodyOf(spy).response_format).toBeUndefined();
     expect(bodyOf(spy).temperature).toBe(0.9);
     expect(out).toBe("一句话");
+  });
+
+  it("AI_JSON_MODE=0 时 json 路径也不带 response_format（内网端点常不认这个字段）", async () => {
+    process.env.AI_JSON_MODE = "0";
+    const spy = captureFetch('{"a":1}');
+    const out = await chatWithMessages([{ role: "user", content: "x" }], "sys");
+    expect(bodyOf(spy).response_format).toBeUndefined();
+    // 关掉字段不等于放弃 JSON：仍然要能拿到内容交给 parseJsonLoose 兜底
+    expect(out).toBe('{"a":1}');
   });
 });
