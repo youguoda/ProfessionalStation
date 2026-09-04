@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Hand, Square, X } from "lucide-react";
+import { ArrowRight, Check, Hand, Hourglass, Square, X } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { api } from "@/lib/client/api";
 import {
@@ -313,6 +313,13 @@ function SettlementRow({
               >
                 <Square className="h-3 w-3" />
                 放回待办
+              </button>
+              <button
+                onClick={() => run(() => transition(task.id, { type: "defer" }))}
+                className={`flex items-center gap-1 ${btn}`}
+              >
+                <Hourglass className="h-3 w-3" />
+                将来/也许
               </button>
             </>
           ) : null}

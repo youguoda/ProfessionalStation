@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   Hand,
+  Hourglass,
   Lock,
   Play,
   Repeat,
@@ -237,6 +238,16 @@ export function TaskItem({
               title="放回待办"
             >
               <Square className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+
+          {task.phase === "action" && !done ? (
+            <button
+              onClick={(e) => run(e, () => transition(task.id, { type: "defer" }))}
+              className={iconBtn}
+              title="放到将来/也许（近期不推进，回孵化器）"
+            >
+              <Hourglass className="h-3.5 w-3.5" />
             </button>
           ) : null}
 

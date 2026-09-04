@@ -273,6 +273,15 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
               提到下一步
             </button>
           ) : null}
+          {task.phase === "action" && !done ? (
+            <button
+              onClick={() => transition(task.id, { type: "defer" }).catch((e) => toastError(e))}
+              className="rounded-md border px-3 py-1.5 text-xs"
+              title="近期不推进，放回孵化器（释放在制品名额与今日额度）"
+            >
+              放到将来/也许
+            </button>
+          ) : null}
           {!done && task.phase !== "trash" ? (
             <button
               onClick={() => {

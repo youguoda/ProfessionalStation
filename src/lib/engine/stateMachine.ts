@@ -20,6 +20,8 @@ export type TaskEvent =
   | { type: "clarify"; target: ClarifyTarget }
   /** 激活：someday/waiting 提回下一步（孵化成熟或等待结束，重新回到行动） */
   | { type: "activate" }
+  /** 搁置：action → someday（决定近期不推进，放回孵化器） */
+  | { type: "defer" }
   | { type: "start" }
   /** 放回待办：把在制品退回库存，不算失败 */
   | { type: "stop" }
@@ -64,6 +66,17 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
         return err(`任务已${task.status === "done" ? "完成" : "取消"}，请使用「重新打开」`);
       }
       return ok({ ...task, phase: "action", status: "todo", waitingFor: null });
+    }
+
+    case "defer": {
+      if (task.phase !== "action") {
+        return err(`只有「下一步行动」任务才能放到将来/也许（当前：${task.phase}）`);
+      }
+      if (task.status === "done" || task.status === "canceled") {
+        return err(`任务已${task.status === "done" ? "完成" : "取消"}，请使用「重新打开」`);
+      }
+      // 搁置即释放占用的所有额度：在制品名额与今天的承诺
+      return ok({ ...task, phase: "someday", status: "todo", startedAt: null, plannedFor: null });
     }
 
     case "start": {

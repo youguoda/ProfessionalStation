@@ -97,6 +97,53 @@ describe("状态机：activate 激活回流", () => {
   });
 });
 
+describe("状态机：defer 搁置", () => {
+  it("action 待办可搁置到将来/也许", () => {
+    const t = createTask({ title: "x", phase: "action", plannedFor: "2025-01-08" });
+    const r = transition(t, { type: "defer" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.phase).toBe("someday");
+      expect(r.task.status).toBe("todo");
+      expect(r.task.plannedFor).toBeNull();
+    }
+  });
+
+  it("搁置进行中的任务会顺带停下（释放在制品名额）", () => {
+    const doing = createTask({ title: "x", phase: "action", status: "doing" });
+    doing.startedAt = "2025-01-01T00:00:00.000Z";
+    const r = transition(doing, { type: "defer" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.phase).toBe("someday");
+      expect(r.task.status).toBe("todo");
+      expect(r.task.startedAt).toBeNull();
+    }
+  });
+
+  it("inbox / waiting / someday / trash 不能被搁置", () => {
+    for (const phase of ["inbox", "waiting", "someday", "trash"] as const) {
+      const r = transition(createTask({ title: "x", phase }), { type: "defer" });
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it("已完结的 action 任务不能被搁置（应走 reopen）", () => {
+    const done = createTask({ title: "x", phase: "action", status: "done" });
+    expect(transition(done, { type: "defer" }).ok).toBe(false);
+  });
+
+  it("搁置后可再激活回来（孵化器往返）", () => {
+    const r = transitionMany(createTask({ title: "x", phase: "action" }), [
+      { type: "defer" },
+      { type: "activate" },
+      { type: "start" },
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.status).toBe("doing");
+  });
+});
+
 describe("状态机：执行 status 迁移", () => {
   it("action 可 start 进入 doing，并记录 startedAt", () => {
     const r = transition(createTask({ title: "x", phase: "action" }), { type: "start" });
