@@ -242,6 +242,12 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
                 <Hand className="h-3 w-3" />
                 戳一下
               </button>
+              <button
+                onClick={() => transition(task.id, { type: "activate" }).catch((e) => toastError(e))}
+                className="rounded-md border px-3 py-1.5 text-xs"
+              >
+                回到行动
+              </button>
             </>
           ) : null}
           {task.phase === "inbox" ? (
@@ -261,11 +267,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           ) : null}
           {task.phase === "someday" ? (
             <button
-              onClick={() =>
-                transition(task.id, { type: "clarify", target: "action" }).catch((e) =>
-                  toastError(e),
-                )
-              }
+              onClick={() => transition(task.id, { type: "activate" }).catch((e) => toastError(e))}
               className="rounded-md border px-3 py-1.5 text-xs"
             >
               提到下一步

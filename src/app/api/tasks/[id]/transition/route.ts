@@ -4,6 +4,7 @@ import type { TaskEvent } from "@/lib/engine/stateMachine";
 
 const EVENT_TYPES = [
   "clarify",
+  "activate",
   "start",
   "stop",
   "complete",

@@ -350,6 +350,7 @@ export async function updateTask(
 
 const EVENT_HISTORY_LABELS: Record<TaskEvent["type"], string> = {
   clarify: "澄清了任务",
+  activate: "提回下一步",
   start: "开始执行",
   stop: "放回待办",
   complete: "完成",

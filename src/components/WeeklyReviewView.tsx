@@ -333,12 +333,19 @@ function SettlementRow({
                 <Hand className="h-3 w-3" />
                 再戳一次
               </button>
+              <button
+                onClick={() => run(() => transition(task.id, { type: "activate" }))}
+                className={`flex items-center gap-1 ${btn}`}
+              >
+                <ArrowRight className="h-3 w-3" />
+                回到行动
+              </button>
             </>
           ) : null}
 
           {kind === "someday" ? (
             <button
-              onClick={() => run(() => transition(task.id, { type: "clarify", target: "action" }))}
+              onClick={() => run(() => transition(task.id, { type: "activate" }))}
               className={`flex items-center gap-1 ${btn}`}
             >
               <ArrowRight className="h-3 w-3" />

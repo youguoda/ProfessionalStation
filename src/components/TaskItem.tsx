@@ -241,24 +241,31 @@ export function TaskItem({
           ) : null}
 
           {task.phase === "waiting" && !done ? (
-            <button
-              onClick={(e) =>
-                run(e, async () => {
-                  await nudgeTask(task.id);
-                })
-              }
-              className={iconBtn}
-              title="戳一下（重置等待计时）"
-            >
-              <Hand className="h-3.5 w-3.5" />
-            </button>
+            <>
+              <button
+                onClick={(e) => run(e, () => transition(task.id, { type: "activate" }))}
+                className={iconBtn}
+                title="回到行动（等待结束，重新由我来做）"
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={(e) =>
+                  run(e, async () => {
+                    await nudgeTask(task.id);
+                  })
+                }
+                className={iconBtn}
+                title="戳一下（重置等待计时）"
+              >
+                <Hand className="h-3.5 w-3.5" />
+              </button>
+            </>
           ) : null}
 
           {task.phase === "someday" ? (
             <button
-              onClick={(e) =>
-                run(e, () => transition(task.id, { type: "clarify", target: "action" }))
-              }
+              onClick={(e) => run(e, () => transition(task.id, { type: "activate" }))}
               className={iconBtn}
               title="提到下一步"
             >

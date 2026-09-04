@@ -82,7 +82,7 @@
 
 `transition(task, event) -> Task | error`，是**唯一**的状态转换真相源。非法迁移返回错误而非静默。
 
-- 事件：`clarify`（action/waiting/someday）、`start`、`stop`（放回待办）、`complete`、`reopen`、`cancel(reason?)`、`trash`、`restore`。
+- 事件：`clarify`（action/waiting/someday）、`activate`（someday/waiting → action，孵化成熟或等待结束的回流）、`start`、`stop`（放回待办）、`complete`、`reopen`、`cancel(reason?)`、`trash`、`restore`。
 - 仓储层额外施加两条业务约束：**依赖阻断**（被阻塞不能 start）与**WIP 上限**（超限不能 start）。
 - `start` 会顺带把任务放进今天（开始做 = 就是今天做）。
 

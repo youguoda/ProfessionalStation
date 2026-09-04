@@ -54,6 +54,49 @@ describe("状态机：澄清 phase 迁移", () => {
   });
 });
 
+describe("状态机：activate 激活回流", () => {
+  it("someday 可激活回下一步，状态为 todo", () => {
+    const r = transition(createTask({ title: "x", phase: "someday" }), { type: "activate" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.phase).toBe("action");
+      expect(r.task.status).toBe("todo");
+    }
+  });
+
+  it("waiting 可激活回下一步，并清除 waitingFor", () => {
+    const waiting = createTask({ title: "x", phase: "waiting", waitingFor: "张三" });
+    const r = transition(waiting, { type: "activate" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.phase).toBe("action");
+      expect(r.task.waitingFor).toBeNull();
+    }
+  });
+
+  it("inbox / action / trash 不能被激活", () => {
+    for (const phase of ["inbox", "action", "trash"] as const) {
+      const r = transition(createTask({ title: "x", phase }), { type: "activate" });
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it("已完成的 waiting 任务不能被激活（应走 reopen）", () => {
+    const done = createTask({ title: "x", phase: "waiting", status: "done" });
+    expect(transition(done, { type: "activate" }).ok).toBe(false);
+  });
+
+  it("激活后可继续 start / complete（完整动线）", () => {
+    const r = transitionMany(createTask({ title: "x", phase: "someday" }), [
+      { type: "activate" },
+      { type: "start" },
+      { type: "complete" },
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.task.status).toBe("done");
+  });
+});
+
 describe("状态机：执行 status 迁移", () => {
   it("action 可 start 进入 doing，并记录 startedAt", () => {
     const r = transition(createTask({ title: "x", phase: "action" }), { type: "start" });

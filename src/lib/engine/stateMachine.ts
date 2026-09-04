@@ -18,6 +18,8 @@ export type ClarifyTarget = Extract<Phase, "action" | "waiting" | "someday">;
 
 export type TaskEvent =
   | { type: "clarify"; target: ClarifyTarget }
+  /** 激活：someday/waiting 提回下一步（孵化成熟或等待结束，重新回到行动） */
+  | { type: "activate" }
   | { type: "start" }
   /** 放回待办：把在制品退回库存，不算失败 */
   | { type: "stop" }
@@ -52,6 +54,16 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
       }
       const status = event.target === "action" ? "todo" : task.status;
       return ok({ ...task, phase: event.target, status });
+    }
+
+    case "activate": {
+      if (task.phase !== "someday" && task.phase !== "waiting") {
+        return err(`只有「将来/也许」或「等待」中的任务才能提回下一步（当前：${task.phase}）`);
+      }
+      if (task.status === "done" || task.status === "canceled") {
+        return err(`任务已${task.status === "done" ? "完成" : "取消"}，请使用「重新打开」`);
+      }
+      return ok({ ...task, phase: "action", status: "todo", waitingFor: null });
     }
 
     case "start": {
