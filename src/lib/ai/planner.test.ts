@@ -17,6 +17,7 @@ beforeEach(() => {
   delete process.env.AI_API_KEY;
   delete process.env.AI_BASE_URL;
   delete process.env.AI_MODEL;
+  delete process.env.AI_TIMEOUT_MS;
 });
 
 afterEach(() => {
@@ -37,6 +38,36 @@ describe("getAiConfig", () => {
     expect(cfg.enabled).toBe(true);
     expect(cfg.baseUrl).toBe("https://example.com/v1");
     expect(cfg.model).toBe("test-model");
+  });
+
+  it("超时默认 60s，AI_TIMEOUT_MS 可调，下限 1s", () => {
+    expect(getAiConfig().timeoutMs).toBe(60_000);
+    process.env.AI_TIMEOUT_MS = "5000";
+    expect(getAiConfig().timeoutMs).toBe(5_000);
+    process.env.AI_TIMEOUT_MS = "10";
+    expect(getAiConfig().timeoutMs).toBe(1_000);
+  });
+});
+
+describe("超时中断", () => {
+  it("超时后抛出可读错误而不是无限悬着", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    process.env.AI_TIMEOUT_MS = "80";
+    // 模拟真实 fetch 的 abort 行为：signal 触发时以 TimeoutError 拒绝
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: unknown, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal!.addEventListener("abort", () =>
+              reject(new DOMException("signal timed out", "TimeoutError")),
+            );
+          }),
+      ),
+    );
+    await expect(chatWithMessages([{ role: "user", content: "hi" }])).rejects.toThrow(
+      /AI 请求超时/,
+    );
   });
 });
 

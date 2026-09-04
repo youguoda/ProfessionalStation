@@ -13,6 +13,8 @@ export interface AiConfig {
   baseUrl: string;
   model: string;
   jsonMode: boolean;
+  /** 单次非流式调用超时（ms）；流式为它的 3 倍——打字机可能持续较久 */
+  timeoutMs: number;
 }
 
 export function getAiConfig(): AiConfig {
@@ -25,7 +27,16 @@ export function getAiConfig(): AiConfig {
     // 不少自建/内网的 OpenAI 兼容端点不认 response_format，会直接 400。
     // 置 AI_JSON_MODE=0 关掉它：改由 system 提示词要求 JSON，parseJsonLoose 兜底。
     jsonMode: jsonModeRaw !== "0" && jsonModeRaw !== "false",
+    timeoutMs: Math.max(1_000, Number(process.env.AI_TIMEOUT_MS) || 60_000),
   };
+}
+
+/** 把超时中断翻译成可读的错误，其余异常原样抛出 */
+function rethrowIfTimeout(e: unknown, ms: number): never {
+  if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+    throw new Error(`AI 请求超时（${Math.round(ms / 1000)}s，可用 AI_TIMEOUT_MS 调整）`);
+  }
+  throw e;
 }
 
 /** 调用 OpenAI 兼容 chat/completions，返回消息内容 */
@@ -48,31 +59,38 @@ export async function chatWithMessages(
 ): Promise<string> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.AI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages: [
-        {
-          role: "system",
-          content:
-            system ??
-            (format === "json"
-              ? "你是一个任务管理助手。只输出合法 JSON，不要输出任何多余文字或代码块。"
-              : "你是一个任务管理助手。"),
-        },
-        ...messages,
-      ],
-      temperature,
-      ...(format === "json" && cfg.jsonMode
-        ? { response_format: { type: "json_object" } }
-        : {}),
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.AI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          {
+            role: "system",
+            content:
+              system ??
+              (format === "json"
+                ? "你是一个任务管理助手。只输出合法 JSON，不要输出任何多余文字或代码块。"
+                : "你是一个任务管理助手。"),
+          },
+          ...messages,
+        ],
+        temperature,
+        ...(format === "json" && cfg.jsonMode
+          ? { response_format: { type: "json_object" } }
+          : {}),
+      }),
+      // 端点挂起时别让请求无限悬着——聊天 SSE、拆分、摘要全走这里
+      signal: AbortSignal.timeout(cfg.timeoutMs),
+    });
+  } catch (e) {
+    rethrowIfTimeout(e, cfg.timeoutMs);
+  }
   if (!res.ok) {
     throw new Error(`AI 服务返回错误（HTTP ${res.status}）`);
   }
@@ -95,25 +113,33 @@ export async function* streamChat(
 ): AsyncGenerator<string> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.AI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages: [
-        {
-          role: "system",
-          content: system ?? "你是一个任务管理助手，用中文简洁回复。",
-        },
-        ...messages,
-      ],
-      temperature,
-      stream: true,
-    }),
-  });
+  // 超时覆盖整个流式会话（连接 + 打字机全程），流式放宽到 3 倍
+  const streamTimeout = cfg.timeoutMs * 3;
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.AI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          {
+            role: "system",
+            content: system ?? "你是一个任务管理助手，用中文简洁回复。",
+          },
+          ...messages,
+        ],
+        temperature,
+        stream: true,
+      }),
+      signal: AbortSignal.timeout(streamTimeout),
+    });
+  } catch (e) {
+    rethrowIfTimeout(e, streamTimeout);
+  }
   if (!res.ok) {
     throw new Error(`AI 服务返回错误（HTTP ${res.status}）`);
   }
