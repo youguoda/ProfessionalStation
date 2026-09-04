@@ -1,6 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createTempStore } from "@/test/tmpStore";
 import { isoDay } from "@/lib/engine/selectors";
+import { __resetStore } from "./store";
 import * as store from "./store";
 
 const ts = createTempStore();
@@ -616,5 +619,35 @@ describe("周回顾草稿", () => {
     await store.setWeeklyReviewDraft({ checklist: { a: true }, notes: "复盘" });
     await store.createWeeklyReview({ notes: "复盘", checklist: { a: true } });
     expect(await store.getWeeklyReviewDraft()).toEqual({ checklist: {}, notes: "" });
+  });
+});
+
+describe("原子写盘", () => {
+  it("写盘后 db.json 完整且无 .tmp 残留", async () => {
+    await store.createTask({ title: "A" });
+    const dir = process.env.DATA_DIR!;
+    const files = readdirSync(dir);
+    expect(files).toContain("db.json");
+    expect(files.filter((f) => f.includes(".tmp"))).toEqual([]);
+    // 落盘的是合法 JSON
+    expect(() => JSON.parse(readFileSync(join(dir, "db.json"), "utf-8"))).not.toThrow();
+  });
+
+  it("写盘失败后内存缓存被重置，不与磁盘分叉", async () => {
+    await store.createTask({ title: "A" });
+    const goodDir = process.env.DATA_DIR!;
+
+    // 用一个普通文件做父路径：mkdir 立即 ENOTDIR，制造一次注定失败的变更
+    const blocker = join(goodDir, "blocker");
+    writeFileSync(blocker, "x");
+    process.env.DATA_DIR = join(blocker, "sub");
+    __resetStore();
+    await expect(store.createTask({ title: "B" })).rejects.toThrow();
+
+    // 切回原目录：磁盘上仍然只有 A，失败期间的内存态没有留下痕迹
+    process.env.DATA_DIR = goodDir;
+    __resetStore();
+    const titles = (await store.listTasks()).map((t) => t.title);
+    expect(titles).toEqual(["A"]);
   });
 });

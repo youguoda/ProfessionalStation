@@ -249,7 +249,11 @@ async function readDb(): Promise<Db> {
 async function writeDb(db: Db): Promise<void> {
   const file = dataPath();
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify(db, null, 2), "utf-8");
+  // 原子写：先写同目录临时文件再 rename 覆盖。进程在写入中途崩溃时，
+  // 最坏留下一个 .tmp 残留，db.json 永远是完整可解析的一份。
+  const tmp = `${file}.tmp-${process.pid}`;
+  await fs.writeFile(tmp, JSON.stringify(db, null, 2), "utf-8");
+  await fs.rename(tmp, file);
   dbCache = db;
 }
 
@@ -257,7 +261,14 @@ async function mutate<T>(fn: (db: Db) => T | Promise<T>): Promise<T> {
   return withLock(async () => {
     const db = await readDb();
     const result = await fn(db);
-    await writeDb(db);
+    try {
+      await writeDb(db);
+    } catch (e) {
+      // 写盘失败：丢弃已变异的内存缓存，下次从磁盘重读。
+      // 否则内存与磁盘分叉，下一次成功的写入会把失败期间的状态悄悄落盘。
+      dbCache = null;
+      throw e;
+    }
     return result;
   });
 }
