@@ -23,6 +23,40 @@ import { SettingsView } from "./SettingsView";
 import { CoachBar } from "./CoachBar";
 import { triggerUndo } from "@/store/useToast";
 import { checkReminders } from "@/lib/client/reminders";
+import type { ScopeId } from "@/lib/domain/types";
+
+/**
+ * 导航即生命周期：处理（收件箱→今天→进行中→等待）→ 库存 → 组织 → 结算。
+ * 每个范围只有一种正确的展示方式，所以不再有「视图模式」这个选择。
+ */
+function MainContent({ scope, onSelect }: { scope: ScopeId; onSelect: (id: string) => void }) {
+  switch (scope) {
+    case "inbox":
+      return <ClarifyView onSelect={onSelect} />;
+    case "today":
+      return <TodayView onSelect={onSelect} />;
+    case "doing":
+      return <DoingView onSelect={onSelect} />;
+    case "notes":
+      return <NotesView />;
+    case "habits":
+      return <HabitsView />;
+    case "review":
+      return <WeeklyReviewView onSelect={onSelect} />;
+    case "automation":
+      return <AutomationView />;
+    case "settings":
+      return <SettingsView />;
+    case "log":
+      return <LogView onSelect={onSelect} />;
+    default:
+      break;
+  }
+  if (scope.startsWith("project:")) {
+    return <ProjectDetailView projectId={scope.slice("project:".length)} onSelect={onSelect} />;
+  }
+  return <ListView scope={scope} onSelect={onSelect} />;
+}
 
 export function App() {
   const load = useStore((s) => s.load);
@@ -99,36 +133,10 @@ export function App() {
   /**
    * 导航即生命周期：处理（收件箱→今天→进行中→等待）→ 库存 → 组织 → 结算。
    * 每个范围只有一种正确的展示方式，所以不再有「视图模式」这个选择。
+   * MainContent 必须是模块级组件：App 订阅了 tasks（到期提醒需要），
+   * 定义在 App 体内会导致每次任务变化都卸载重建整个视图，丢失列表键盘
+   * 选中态与输入焦点。
    */
-  function MainContent() {
-    switch (scope) {
-      case "inbox":
-        return <ClarifyView onSelect={openTask} />;
-      case "today":
-        return <TodayView onSelect={openTask} />;
-      case "doing":
-        return <DoingView onSelect={openTask} />;
-      case "notes":
-        return <NotesView />;
-      case "habits":
-        return <HabitsView />;
-      case "review":
-        return <WeeklyReviewView onSelect={openTask} />;
-      case "automation":
-        return <AutomationView />;
-      case "settings":
-        return <SettingsView />;
-      case "log":
-        return <LogView onSelect={openTask} />;
-      default:
-        break;
-    }
-    if (scope.startsWith("project:")) {
-      return <ProjectDetailView projectId={scope.slice("project:".length)} onSelect={openTask} />;
-    }
-    return <ListView scope={scope} onSelect={openTask} />;
-  }
-
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
@@ -137,7 +145,7 @@ export function App() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-4xl">
             <CoachBar />
-            <MainContent />
+            <MainContent scope={scope} onSelect={openTask} />
           </div>
         </main>
       </div>
