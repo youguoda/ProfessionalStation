@@ -446,6 +446,38 @@ describe("API：马力 Agent", () => {
     expect(withProposals.proposals[0].tool).toBe("create_task");
   });
 
+  it("chat 思考过程实时转发并随消息落库", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (body.includes('"stream":true')) {
+          const sse =
+            `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "用户在问身份，简短答。" } }] })}\n\n` +
+            `data: ${JSON.stringify({ choices: [{ delta: { content: "我是马力。" } }] })}\n\n` +
+            "data: [DONE]\n\n";
+          return new Response(sse, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"proposals":[]}' } }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "你是谁" }));
+    const events = await parseSseEvents(res);
+    // 思考增量先于 token 转发
+    const types = events.map((e) => e.type);
+    expect(types.indexOf("reasoning")).toBeLessThan(types.indexOf("token"));
+    // 落库：done 消息里带思考过程
+    const done = events.find((e) => e.type === "done")!;
+    expect((done.messages as SseMessages)[1].reasoning).toBe("用户在问身份，简短答。");
+  });
+
   it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockAgentFetch(["建议完成这个任务。"], [

@@ -145,8 +145,13 @@ export const api = {
     text: string,
     onToken: (delta: string) => void,
     signal?: AbortSignal,
-    /** token 之外的通知：阶段变化 + 延迟到达的建议卡片 */
-    onNotice?: (ev: { type: "phase"; phase: "context" | "model" } | { type: "proposals"; messages: ChatMessage[] }) => void,
+    /** token 之外的通知：阶段变化 + 思考增量 + 延迟到达的建议卡片 */
+    onNotice?: (
+      ev:
+        | { type: "phase"; phase: "context" | "model" }
+        | { type: "reasoning"; text: string }
+        | { type: "proposals"; messages: ChatMessage[] },
+    ) => void,
   ): Promise<ChatMessage[]> => {
     const res = await fetch("/api/agent/chat", {
       method: "POST",
@@ -162,6 +167,7 @@ export const api = {
       // resolve 之后 readSse 仍在消费：晚到的 proposals 事件继续经 onNotice 上抛
       readSse(res, (ev) => {
         if (ev.type === "token" && ev.text) onToken(ev.text);
+        if (ev.type === "reasoning" && ev.text) onNotice?.({ type: "reasoning", text: ev.text });
         if (ev.type === "phase") onNotice?.({ type: "phase", phase: ev.phase ?? "model" });
         if (ev.type === "proposals" && ev.messages) onNotice?.({ type: "proposals", messages: ev.messages });
         if (ev.type === "done" && ev.messages) resolve(ev.messages);

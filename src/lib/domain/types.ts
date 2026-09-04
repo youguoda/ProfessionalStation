@@ -233,6 +233,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** 推理模型的思考过程（端点不返回则没有此字段），前端折叠展示 */
+  reasoning?: string;
   proposals: ActionProposal[];
   createdAt: string;
 }

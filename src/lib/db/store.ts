@@ -833,6 +833,7 @@ export async function appendChatMessages(
   messages: Array<{
     role: ChatMessage["role"];
     content: string;
+    reasoning?: string;
     proposals?: ChatMessage["proposals"];
   }>,
 ): Promise<ChatMessage[]> {
@@ -842,6 +843,7 @@ export async function appendChatMessages(
         id: uid(),
         role: m.role,
         content: m.content,
+        reasoning: m.reasoning || undefined,
         proposals: m.proposals ?? [],
         createdAt: nowIso(),
       });

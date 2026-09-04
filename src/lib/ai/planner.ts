@@ -102,15 +102,23 @@ export async function chatWithMessages(
   return content;
 }
 
+/** 流式增量：推理模型的思考（reasoning_content）与正文分开产出 */
+export interface StreamDelta {
+  reasoning?: string;
+  content?: string;
+}
+
 /**
- * 流式调用（SSE 上游解析）：逐段产出 delta 文本。
+ * 流式调用（SSE 上游解析）：逐段产出 delta。
  * 用于马力的打字机回复（该调用不设置 json_object，模型输出纯文本）。
+ * 端点若返回 reasoning_content（Qwen3/DeepSeek-R1 类推理模型），
+ * 思考过程以 reasoning 增量单独产出，供前端展示「思考过程」。
  */
 export async function* streamChat(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   system?: string,
   temperature = 0.7,
-): AsyncGenerator<string> {
+): AsyncGenerator<StreamDelta> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
   // 超时覆盖整个流式会话（连接 + 打字机全程），流式放宽到 3 倍
@@ -161,10 +169,14 @@ export async function* streamChat(
       if (payload === "[DONE]") return;
       try {
         const json = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>;
+          choices?: Array<{
+            delta?: { content?: string; reasoning_content?: string; reasoning?: string };
+          }>;
         };
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) yield delta;
+        const delta = json.choices?.[0]?.delta;
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+        if (reasoning) yield { reasoning };
+        if (delta?.content) yield { content: delta.content };
       } catch {
         /* 忽略无法解析的行 */
       }

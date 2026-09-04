@@ -121,12 +121,35 @@ describe("streamReply 流式回复（不生成建议）", () => {
     process.env.AI_API_KEY = "sk-test";
     mockStreamAndProposals();
     const tokens: string[] = [];
-    const reply = await streamReply(
+    const r = await streamReply(
       { ...base, summary: "", userText: "今天先做什么？" },
       (d) => tokens.push(d),
     );
     expect(tokens.join("")).toBe("今天先做写周报。");
-    expect(reply).toBe("今天先做写周报。");
+    expect(r.reply).toBe("今天先做写周报。");
+    expect(r.reasoning).toBe("");
+  });
+
+  it("思考增量经 onReasoning 单独回调，与正文分开累计", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    const sse =
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "他在问身份。" } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "简短回答。" } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "我是马力。" } }] })}\n\n` +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+      ),
+    );
+    const reasoning: string[] = [];
+    const r = await streamReply({ ...base, summary: "", userText: "你是谁" }, () => {}, (d) =>
+      reasoning.push(d),
+    );
+    expect(reasoning.join("")).toBe("他在问身份。简短回答。");
+    expect(r.reply).toBe("我是马力。");
+    expect(r.reasoning).toBe("他在问身份。简短回答。");
   });
 
   it("proposeAgentActions 单独解析建议", async () => {

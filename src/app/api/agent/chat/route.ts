@@ -27,6 +27,7 @@ export async function DELETE() {
 /**
  * 流式对话（SSE）：
  *   event: phase     {type:"phase", phase:"context"|"model"}   阶段变化（思考等待期的感知）
+ *   event: reasoning {type:"reasoning", text:"..."}            推理模型的思考增量（先于正文）
  *   event: token     {type:"token", text:"..."}                打字机增量
  *   event: done      {type:"done", messages:[...]}             回复落库，立即可继续输入
  *   event: proposals {type:"proposals", messages:[...]}        建议卡片就绪后单独推送
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
         const context = buildAgentContext(db);
         send({ type: "phase", phase: "model" });
 
-        const reply = await streamReply(
+        const result = await streamReply(
           {
             profile: db.agentProfile,
             history,
@@ -89,11 +90,18 @@ export async function POST(req: Request) {
             userText: text,
           },
           (delta) => send({ type: "token", text: delta }),
+          // 思考过程实时转发（推理模型才有；先于正文到达）
+          (delta) => send({ type: "reasoning", text: delta }),
         );
 
         const saved = await appendChatMessages([
           { role: "user" as const, content: text },
-          { role: "assistant" as const, content: reply, proposals: [] },
+          {
+            role: "assistant" as const,
+            content: result.reply,
+            reasoning: result.reasoning.slice(0, 4000) || undefined,
+            proposals: [],
+          },
         ]);
         const assistantMsg = saved[saved.length - 1];
         send({ type: "done", messages: saved });
@@ -103,7 +111,7 @@ export async function POST(req: Request) {
           db.agentProfile,
           history,
           text,
-          reply,
+          result.reply,
           context,
           summary,
         );
@@ -120,7 +128,7 @@ export async function POST(req: Request) {
         }
 
         // 后台提炼记忆笔记（不阻塞响应）
-        void extractMemoryFacts(text, reply, db.memoryNotes)
+        void extractMemoryFacts(text, result.reply, db.memoryNotes)
           .then(async (facts) => {
             for (const fact of facts) await addMemoryNote(fact);
           })

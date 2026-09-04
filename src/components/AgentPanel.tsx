@@ -9,7 +9,44 @@ import type { ActionProposal, ChatMessage } from "@/lib/domain/types";
 import { AgentSettings } from "./AgentSettings";
 import { toast, toastError } from "@/store/useToast";
 import { Markdown } from "@/lib/markdown";
-import { Pencil, Send, Square, Trash2, X } from "lucide-react";
+import { Brain, ChevronDown, ChevronRight, Pencil, Send, Square, Trash2, X } from "lucide-react";
+
+/** 可折叠的「思考过程」块：推理模型的 reasoning（端点不返回则整块不出现） */
+function ThinkingBlock({ text, live = false }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // 展开态 + 流式进行中：跟随最新内容滚动
+  useEffect(() => {
+    if (open && live) boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight });
+  }, [text, open, live]);
+
+  return (
+    <div className="mb-1.5 rounded-lg border border-dashed bg-muted/20 text-[11px]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 px-2 py-1 text-muted-foreground hover:text-foreground"
+      >
+        <Brain className="h-3 w-3" />
+        思考过程{text ? `（${text.length} 字）` : ""}
+        {live ? <span className="animate-pulse">思考中…</span> : null}
+        {open ? (
+          <ChevronDown className="ml-auto h-3 w-3" />
+        ) : (
+          <ChevronRight className="ml-auto h-3 w-3" />
+        )}
+      </button>
+      {open ? (
+        <div
+          ref={boxRef}
+          className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-dashed px-2 py-1.5 leading-relaxed text-muted-foreground"
+        >
+          {text || "（空）"}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function ProposalCard({
   message,
@@ -129,6 +166,8 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
+  /** 推理模型的思考过程（实时累计，端点不返回则始终为空） */
+  const [reasoning, setReasoning] = useState("");
   /** 思考阶段：context = 翻计划数据，model = 等模型首 token */
   const [phase, setPhase] = useState<"context" | "model">("context");
   /** 首 token 前的等待计时（秒），让慢端点上的等待可感知 */
@@ -168,6 +207,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
     setText("");
     setPendingUser(t);
     setStreaming("");
+    setReasoning("");
     setPhase("context");
     setThinkStart(Date.now());
     setElapsed(0);
@@ -179,6 +219,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
         abortRef.current.signal,
         (ev) => {
           if (ev.type === "phase") setPhase(ev.phase);
+          if (ev.type === "reasoning") setReasoning((r) => r + ev.text);
           // 建议卡片晚于回复到达（生成不阻塞回复），就绪即插入
           if (ev.type === "proposals") setChatMessages(ev.messages);
         },
@@ -284,6 +325,9 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                             : "border bg-muted/40"
                         }`}
                       >
+                        {m.role === "assistant" && m.reasoning ? (
+                          <ThinkingBlock text={m.reasoning} />
+                        ) : null}
                         <Markdown text={m.content} />
                         {m.role === "user" ? (
                           <button
@@ -325,10 +369,15 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                   <div className="flex justify-start">
                     <div className="max-w-[85%] rounded-xl border bg-muted/40 px-3 py-2 text-sm">
                       {streaming ? (
-                        <span className="whitespace-pre-wrap">
-                          {streaming}
-                          <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
-                        </span>
+                        <>
+                          {reasoning ? <ThinkingBlock text={reasoning} /> : null}
+                          <span className="whitespace-pre-wrap">
+                            {streaming}
+                            <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
+                          </span>
+                        </>
+                      ) : reasoning ? (
+                        <ThinkingBlock text={reasoning} live />
                       ) : (
                         <span className="text-muted-foreground">
                           {phase === "context" ? `${name}正在翻你的计划…` : `${name}正在思考…`}

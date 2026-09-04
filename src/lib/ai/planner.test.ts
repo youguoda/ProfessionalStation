@@ -127,9 +127,31 @@ describe("streamChat 流式解析", () => {
     mockStream(["你", "好", "！"]);
     const parts: string[] = [];
     for await (const delta of streamChat([{ role: "user", content: "x" }], "sys")) {
-      parts.push(delta);
+      parts.push(delta.content ?? "");
     }
     expect(parts).toEqual(["你", "好", "！"]);
+  });
+
+  it("reasoning_content 思考增量单独产出（先于正文）", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    const sse =
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "先想想" } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "继续想" } }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "答案" } }] })}\n\n` +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+      ),
+    );
+    const parts: Array<{ reasoning?: string; content?: string }> = [];
+    for await (const delta of streamChat([{ role: "user", content: "x" }])) parts.push(delta);
+    expect(parts).toEqual([
+      { reasoning: "先想想" },
+      { reasoning: "继续想" },
+      { content: "答案" },
+    ]);
   });
 
   it("上游错误状态抛错", async () => {

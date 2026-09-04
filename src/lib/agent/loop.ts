@@ -53,15 +53,23 @@ export interface AgentStreamInput {
   userText: string;
 }
 
+export interface StreamReplyResult {
+  reply: string;
+  /** 推理模型的思考过程（端点不返回则为空串） */
+  reasoning: string;
+}
+
 /**
  * 流式回复：逐 token 回调（打字机），只负责把话说完。
  * 建议二次调用（proposeAgentActions）由调用方另行编排——回复落库不等它，
  * 慢端点上一次聊天不必排两次队。
+ * 思考增量（reasoning_content）经 onReasoning 单独回调，先于正文到达。
  */
 export async function streamReply(
   input: AgentStreamInput,
   onToken: (delta: string) => void,
-): Promise<string> {
+  onReasoning?: (delta: string) => void,
+): Promise<StreamReplyResult> {
   if (!getAiConfig().enabled) {
     throw new Error("未配置 AI_API_KEY，请在 .env 中设置并重启服务");
   }
@@ -81,11 +89,21 @@ export async function streamReply(
   ];
 
   let reply = "";
+  let reasoning = "";
   for await (const delta of streamChat(messages, system)) {
-    reply += delta;
-    onToken(delta);
+    if (delta.reasoning) {
+      reasoning += delta.reasoning;
+      onReasoning?.(delta.reasoning);
+    }
+    if (delta.content) {
+      reply += delta.content;
+      onToken(delta.content);
+    }
   }
-  return reply.trim() || "（我好像走神了，请再说一次？）";
+  return {
+    reply: reply.trim() || "（我好像走神了，请再说一次？）",
+    reasoning: reasoning.trim(),
+  };
 }
 
 /** 建议二次调用（非流式，输出 proposals JSON） */

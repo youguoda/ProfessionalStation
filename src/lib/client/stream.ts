@@ -6,7 +6,7 @@ import type { ChatMessage } from "@/lib/domain/types";
  */
 
 export interface SseEvent {
-  type: "token" | "done" | "error" | "phase" | "proposals";
+  type: "token" | "done" | "error" | "phase" | "proposals" | "reasoning";
   text?: string;
   messages?: ChatMessage[];
   error?: string;
