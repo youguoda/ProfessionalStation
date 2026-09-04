@@ -400,16 +400,17 @@ describe("API：马力 Agent", () => {
     );
   }
 
-  async function parseSseDone(res: Response): Promise<{
-    messages: Array<Record<string, unknown> & { id: string; content: string; role: string; proposals: Array<Record<string, unknown>> }>;
-  }> {
+  type SseMessages = Array<
+    Record<string, unknown> & { id: string; content: string; role: string; proposals: Array<Record<string, unknown>> }
+  >;
+
+  async function parseSseEvents(res: Response): Promise<Array<{ type: string } & Record<string, unknown>>> {
     const raw = await res.text();
-    const doneLine = raw
+    return raw
       .split("\n\n")
       .map((s) => s.trim())
-      .find((s) => s.startsWith("data: ") && s.includes('"type":"done"'));
-    expect(doneLine).toBeDefined();
-    return JSON.parse(doneLine!.slice(5).trim());
+      .filter((s) => s.startsWith("data: "))
+      .map((s) => JSON.parse(s.slice(5).trim()));
   }
 
   it("chat 配置 key + mock fetch → SSE 流式追加消息与待确认建议", async () => {
@@ -420,17 +421,29 @@ describe("API：马力 Agent", () => {
     const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "今天先做什么？" }));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    const raw = await res.clone().text();
-    expect(raw).toContain('"type":"token"');
-    const done = await parseSseDone(res);
-    const messages = done.messages;
-    expect(messages).toHaveLength(2);
-    expect(messages[0].role).toBe("user");
-    expect(messages[1].role).toBe("assistant");
-    expect(messages[1].content).toBe("今天先做写周报吧。");
-    expect(messages[1].proposals).toHaveLength(1);
-    expect(messages[1].proposals[0].status).toBe("pending");
-    expect(messages[1].proposals[0].tool).toBe("create_task");
+    const events = await parseSseEvents(res);
+
+    // 阶段事件先行（思考等待期的感知）
+    expect(events[0]).toMatchObject({ type: "phase", phase: "context" });
+    expect(events.some((e) => e.type === "phase" && e.phase === "model")).toBe(true);
+    expect(events.some((e) => e.type === "token")).toBe(true);
+
+    // done 先行：回复已落库，此刻还没有建议
+    const done = events.find((e) => e.type === "done")!;
+    const doneMessages = done.messages as SseMessages;
+    expect(doneMessages).toHaveLength(2);
+    expect(doneMessages[0].role).toBe("user");
+    expect(doneMessages[1].role).toBe("assistant");
+    expect(doneMessages[1].content).toBe("今天先做写周报吧。");
+    expect(doneMessages[1].proposals).toEqual([]);
+
+    // 建议就绪后单独推送，挂在同一条消息上
+    const proposalsEv = events.find((e) => e.type === "proposals")!;
+    const withProposals = (proposalsEv.messages as SseMessages)[1];
+    expect(withProposals.id).toBe(doneMessages[1].id);
+    expect(withProposals.proposals).toHaveLength(1);
+    expect(withProposals.proposals[0].status).toBe("pending");
+    expect(withProposals.proposals[0].tool).toBe("create_task");
   });
 
   it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
@@ -439,9 +452,9 @@ describe("API：马力 Agent", () => {
       { tool: "plan_today", args: { taskId: "t1", day: "2025-01-08" }, summary: "放进今天" },
     ]);
     const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
-    const done = await parseSseDone(res);
-    const msg = done.messages[1];
-    const pid = msg.proposals[0].id;
+    const events = await parseSseEvents(res);
+    const msg = (events.find((e) => e.type === "proposals")!.messages as SseMessages)[1];
+    const pid = msg.proposals[0].id as string;
 
     const r1 = await postAgentProposalStatus(
       jsonReq("/api/agent/proposals", { messageId: msg.id, proposalId: pid, status: "approved" }),
@@ -470,8 +483,9 @@ describe("API：马力 Agent", () => {
   it("DELETE chat 清空对话", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockAgentFetch(["好"], []);
-    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "x" }));
-    await parseSseDone(res);
+    const res = await postAgentChat(jsonReq("/api/agent/chat", { text: "hi" }));
+    const events = await parseSseEvents(res);
+    expect(events.some((e) => e.type === "done")).toBe(true);
     expect((await (await getAgentChat()).json()).length).toBe(2);
     expect((await clearAgentChat()).status).toBe(200);
     expect((await (await getAgentChat()).json()).length).toBe(0);

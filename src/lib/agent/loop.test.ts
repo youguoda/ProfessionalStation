@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAgentProfile } from "@/lib/domain/factory";
-import { runAgentTurn, sanitizeNudge, streamAgentReply } from "./loop";
+import { proposeAgentActions, runAgentTurn, sanitizeNudge, streamReply } from "./loop";
 
 function mockFetch(content: string) {
   vi.stubGlobal(
@@ -77,7 +77,7 @@ describe("runAgentTurn", () => {
   });
 });
 
-describe("streamAgentReply 流式回复", () => {
+describe("streamReply 流式回复（不生成建议）", () => {
   function mockStreamAndProposals() {
     vi.stubGlobal(
       "fetch",
@@ -117,39 +117,38 @@ describe("streamAgentReply 流式回复", () => {
     );
   }
 
-  it("逐 token 回调并完成建议二次调用", async () => {
+  it("逐 token 回调，返回完整回复（不触发建议调用）", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockStreamAndProposals();
     const tokens: string[] = [];
-    const r = await streamAgentReply(
+    const reply = await streamReply(
       { ...base, summary: "", userText: "今天先做什么？" },
       (d) => tokens.push(d),
     );
     expect(tokens.join("")).toBe("今天先做写周报。");
-    expect(r.reply).toBe("今天先做写周报。");
-    expect(r.proposals).toHaveLength(1);
-    expect(r.proposals[0].tool).toBe("create_task");
+    expect(reply).toBe("今天先做写周报。");
   });
 
-  it("建议二次调用失败时不阻塞回复", async () => {
+  it("proposeAgentActions 单独解析建议", async () => {
     process.env.AI_API_KEY = "sk-test";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        const body = typeof init?.body === "string" ? init.body : "";
-        if (body.includes('"stream":true')) {
-          const sse =
-            "data: " +
-            JSON.stringify({ choices: [{ delta: { content: "好的" } }] }) +
-            "\n\ndata: [DONE]\n\n";
-          return new Response(sse, { status: 200 });
-        }
-        return new Response("boom", { status: 500 });
-      }),
+    mockStreamAndProposals();
+    const proposals = await proposeAgentActions(
+      base.profile,
+      [],
+      "帮我安排写周报",
+      "好的，我建议：",
+      "ctx",
+      "",
     );
-    const r = await streamAgentReply({ ...base, summary: "", userText: "x" }, () => {});
-    expect(r.reply).toBe("好的");
-    expect(r.proposals).toEqual([]);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].tool).toBe("create_task");
+  });
+
+  it("proposeAgentActions 失败返回空数组，不抛出", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
+    const proposals = await proposeAgentActions(base.profile, [], "x", "r", "ctx", "");
+    expect(proposals).toEqual([]);
   });
 });
 

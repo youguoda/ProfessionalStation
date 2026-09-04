@@ -2,13 +2,16 @@ import type { ChatMessage } from "@/lib/domain/types";
 
 /**
  * 客户端 SSE 读取工具：解析服务端 text/event-stream（data: {...} 行）。
+ * 心跳为 SSE 注释行（`: ping`），不进 data 解析，天然被忽略。
  */
 
 export interface SseEvent {
-  type: "token" | "done" | "error";
+  type: "token" | "done" | "error" | "phase" | "proposals";
   text?: string;
   messages?: ChatMessage[];
   error?: string;
+  /** phase 事件的阶段：context = 翻计划数据，model = 已发往模型等首 token */
+  phase?: "context" | "model";
 }
 
 export async function readSse(

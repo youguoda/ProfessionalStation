@@ -16,6 +16,7 @@ import {
   type NewTaskInput,
 } from "@/lib/domain/factory";
 import type {
+  ActionProposal,
   AgentProfile,
   Area,
   ChatMessage,
@@ -855,6 +856,21 @@ export async function appendChatMessages(
 export async function clearChat(): Promise<void> {
   return mutate((db) => {
     db.chatMessages = [];
+  });
+}
+
+/** 给已有消息追加建议卡片（建议生成不阻塞回复后的延迟写入），按 id 幂等 */
+export async function appendProposals(
+  messageId: string,
+  proposals: ActionProposal[],
+): Promise<ChatMessage[] | null> {
+  return mutate((db) => {
+    const msg = db.chatMessages.find((m) => m.id === messageId);
+    if (!msg) return null;
+    for (const p of proposals) {
+      if (!msg.proposals.some((x) => x.id === p.id)) msg.proposals.push(p);
+    }
+    return db.chatMessages;
   });
 }
 

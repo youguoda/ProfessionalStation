@@ -145,6 +145,8 @@ export const api = {
     text: string,
     onToken: (delta: string) => void,
     signal?: AbortSignal,
+    /** token 之外的通知：阶段变化 + 延迟到达的建议卡片 */
+    onNotice?: (ev: { type: "phase"; phase: "context" | "model" } | { type: "proposals"; messages: ChatMessage[] }) => void,
   ): Promise<ChatMessage[]> => {
     const res = await fetch("/api/agent/chat", {
       method: "POST",
@@ -157,8 +159,11 @@ export const api = {
       throw new Error(body.error ?? `请求失败（${res.status}）`);
     }
     return new Promise<ChatMessage[]>((resolve, reject) => {
+      // resolve 之后 readSse 仍在消费：晚到的 proposals 事件继续经 onNotice 上抛
       readSse(res, (ev) => {
         if (ev.type === "token" && ev.text) onToken(ev.text);
+        if (ev.type === "phase") onNotice?.({ type: "phase", phase: ev.phase ?? "model" });
+        if (ev.type === "proposals" && ev.messages) onNotice?.({ type: "proposals", messages: ev.messages });
         if (ev.type === "done" && ev.messages) resolve(ev.messages);
         if (ev.type === "error") reject(new Error(ev.error ?? "AI 调用失败"));
       }).catch(reject);

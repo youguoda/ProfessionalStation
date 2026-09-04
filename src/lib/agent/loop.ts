@@ -53,11 +53,15 @@ export interface AgentStreamInput {
   userText: string;
 }
 
-/** 流式回复：逐 token 回调（打字机），随后补一次非流式建议调用 */
-export async function streamAgentReply(
+/**
+ * 流式回复：逐 token 回调（打字机），只负责把话说完。
+ * 建议二次调用（proposeAgentActions）由调用方另行编排——回复落库不等它，
+ * 慢端点上一次聊天不必排两次队。
+ */
+export async function streamReply(
   input: AgentStreamInput,
   onToken: (delta: string) => void,
-): Promise<AgentTurnResult> {
+): Promise<string> {
   if (!getAiConfig().enabled) {
     throw new Error("未配置 AI_API_KEY，请在 .env 中设置并重启服务");
   }
@@ -81,17 +85,7 @@ export async function streamAgentReply(
     reply += delta;
     onToken(delta);
   }
-  const finalReply = reply.trim() || "（我好像走神了，请再说一次？）";
-
-  const proposals = await proposeAgentActions(
-    input.profile,
-    input.history,
-    input.userText,
-    finalReply,
-    input.context,
-    input.summary,
-  );
-  return { reply: finalReply, proposals };
+  return reply.trim() || "（我好像走神了，请再说一次？）";
 }
 
 /** 建议二次调用（非流式，输出 proposals JSON） */

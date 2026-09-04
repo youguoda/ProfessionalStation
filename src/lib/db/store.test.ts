@@ -608,6 +608,24 @@ describe("活动历史", () => {
   });
 });
 
+describe("建议卡片延迟写入", () => {
+  it("appendProposals 挂到指定消息上，按 id 幂等", async () => {
+    await store.appendChatMessages([{ role: "user", content: "帮我安排" }]);
+    const saved = await store.appendChatMessages([
+      { role: "assistant", content: "好的" },
+    ]);
+    const msgId = saved[saved.length - 1].id;
+    const p = { id: "p1", tool: "create_task" as const, args: { title: "x" }, summary: "新建", status: "pending" as const };
+
+    await store.appendProposals(msgId, [p]);
+    await store.appendProposals(msgId, [p]); // 重复写不重复挂
+    const messages = await store.listChatMessages();
+    expect(messages[messages.length - 1].proposals).toHaveLength(1);
+
+    expect(await store.appendProposals("missing", [p])).toBeNull();
+  });
+});
+
 describe("周回顾草稿", () => {
   it("草稿读写一致", async () => {
     await store.setWeeklyReviewDraft({ checklist: { a: true }, notes: "复盘" });

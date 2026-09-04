@@ -129,8 +129,21 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const [showSettings, setShowSettings] = useState(false);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
+  /** 思考阶段：context = 翻计划数据，model = 等模型首 token */
+  const [phase, setPhase] = useState<"context" | "model">("context");
+  /** 首 token 前的等待计时（秒），让慢端点上的等待可感知 */
+  const [thinkStart, setThinkStart] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 思考计时器：首 token 到达（streaming 非空）即停
+  useEffect(() => {
+    if (!busy || streaming || thinkStart === null) return;
+    setElapsed((Date.now() - thinkStart) / 1000);
+    const timer = setInterval(() => setElapsed((Date.now() - thinkStart) / 1000), 200);
+    return () => clearInterval(timer);
+  }, [busy, streaming, thinkStart]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -155,12 +168,20 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
     setText("");
     setPendingUser(t);
     setStreaming("");
+    setPhase("context");
+    setThinkStart(Date.now());
+    setElapsed(0);
     abortRef.current = new AbortController();
     try {
       const messages = await api.sendChatStream(
         t,
         (delta) => setStreaming((s) => s + delta),
         abortRef.current.signal,
+        (ev) => {
+          if (ev.type === "phase") setPhase(ev.phase);
+          // 建议卡片晚于回复到达（生成不阻塞回复），就绪即插入
+          if (ev.type === "proposals") setChatMessages(ev.messages);
+        },
       );
       setChatMessages(messages);
       setPendingUser(null);
@@ -176,6 +197,7 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
       }
     } finally {
       setBusy(false);
+      setThinkStart(null);
       abortRef.current = null;
     }
   }
@@ -308,7 +330,12 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                           <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">{name}正在思考…</span>
+                        <span className="text-muted-foreground">
+                          {phase === "context" ? `${name}正在翻你的计划…` : `${name}正在思考…`}
+                          {thinkStart !== null ? (
+                            <span className="ml-1 tabular-nums">{elapsed.toFixed(1)}s</span>
+                          ) : null}
+                        </span>
                       )}
                     </div>
                   </div>

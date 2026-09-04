@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { buildAgentContext } from "@/lib/agent/context";
 import { extractMemoryFacts } from "@/lib/agent/facts";
-import { streamAgentReply } from "@/lib/agent/loop";
+import { streamReply, proposeAgentActions } from "@/lib/agent/loop";
 import { splitForSummary, summarizeChat } from "@/lib/agent/summary";
 import { getAiConfig } from "@/lib/ai/planner";
 import {
   addMemoryNote,
   appendChatMessages,
+  appendProposals,
   clearChat,
   getDb,
   listChatMessages,
@@ -25,9 +26,13 @@ export async function DELETE() {
 
 /**
  * 流式对话（SSE）：
- *   event: token  {type:"token", text:"..."}   打字机增量
- *   event: done   {type:"done", messages:[...]} 完整消息列表（含建议卡片）
- *   event: error  {type:"error", error:"..."}
+ *   event: phase     {type:"phase", phase:"context"|"model"}   阶段变化（思考等待期的感知）
+ *   event: token     {type:"token", text:"..."}                打字机增量
+ *   event: done      {type:"done", messages:[...]}             回复落库，立即可继续输入
+ *   event: proposals {type:"proposals", messages:[...]}        建议卡片就绪后单独推送
+ *   event: error     {type:"error", error:"..."}
+ *
+ * done 不等建议二次调用——慢端点上一次聊天不必排两次队。
  */
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
@@ -61,48 +66,72 @@ export async function POST(req: Request) {
       const encoder = new TextEncoder();
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // 心跳：慢端点首 token 可能要等很久，SSE 注释行保活（客户端解析器忽略）
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: ping\n\n`));
+        } catch {
+          /* 连接已关闭 */
+        }
+      }, 15_000);
       try {
-        let reply = "";
-        const result = await streamAgentReply(
+        send({ type: "phase", phase: "context" });
+        const context = buildAgentContext(db);
+        send({ type: "phase", phase: "model" });
+
+        const reply = await streamReply(
           {
             profile: db.agentProfile,
             history,
-            context: buildAgentContext(db),
+            context,
             memoryNotes: db.memoryNotes,
             summary,
             userText: text,
           },
-          (delta) => {
-            reply += delta;
-            send({ type: "token", text: delta });
-          },
+          (delta) => send({ type: "token", text: delta }),
         );
 
-        const proposals = result.proposals.map((p) => ({
-          id: crypto.randomUUID(),
-          tool: p.tool,
-          args: p.args,
-          summary: p.summary,
-          status: "pending" as const,
-        }));
-
-        await appendChatMessages([
+        const saved = await appendChatMessages([
           { role: "user" as const, content: text },
-          { role: "assistant" as const, content: result.reply, proposals },
+          { role: "assistant" as const, content: reply, proposals: [] },
         ]);
+        const assistantMsg = saved[saved.length - 1];
+        send({ type: "done", messages: saved });
+
+        // 建议二次调用：回复已经交付，这里慢慢来；就绪后单独推送
+        const proposals = await proposeAgentActions(
+          db.agentProfile,
+          history,
+          text,
+          reply,
+          context,
+          summary,
+        );
+        if (proposals.length > 0) {
+          const mapped = proposals.map((p) => ({
+            id: crypto.randomUUID(),
+            tool: p.tool,
+            args: p.args,
+            summary: p.summary,
+            status: "pending" as const,
+          }));
+          const messages = await appendProposals(assistantMsg.id, mapped);
+          if (messages) send({ type: "proposals", messages });
+        }
 
         // 后台提炼记忆笔记（不阻塞响应）
-        void extractMemoryFacts(text, result.reply, db.memoryNotes)
+        void extractMemoryFacts(text, reply, db.memoryNotes)
           .then(async (facts) => {
             for (const fact of facts) await addMemoryNote(fact);
           })
           .catch(() => {});
 
-        send({ type: "done", messages: await listChatMessages() });
         controller.close();
       } catch (e) {
         send({ type: "error", error: e instanceof Error ? e.message : "AI 调用失败" });
         controller.close();
+      } finally {
+        clearInterval(heartbeat);
       }
     },
   });
