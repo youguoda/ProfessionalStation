@@ -27,10 +27,12 @@ export function TodayView({ onSelect }: { onSelect: (id: string) => void }) {
   const setScope = useStore((s) => s.setScope);
   const [picking, setPicking] = useState(false);
 
-  const today = isoDay(new Date());
-  const list = selectToday(tasks);
-  const cap = todayCapacity(tasks, settings);
-  const overdueCount = selectOverdue(tasks).length;
+  const today = isoDay(new Date()); // 纳秒级字符串拼接，不值得 memo；跨天自动翻新
+  // 「当天」的稳定时间锚点：同一天内引用不变（memo 生效），跨天重建
+  const now = useMemo(() => new Date(`${today}T12:00:00`), [today]);
+  const list = useMemo(() => selectToday(tasks, now), [tasks, now]);
+  const cap = useMemo(() => todayCapacity(tasks, settings, now), [tasks, settings, now]);
+  const overdueCount = useMemo(() => selectOverdue(tasks, now).length, [tasks, now]);
 
   const candidates = useMemo(
     () => selectNextActions(tasks).filter((t) => t.plannedFor !== today),

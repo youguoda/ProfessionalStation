@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useStore } from "@/store/useStore";
 import { Sidebar } from "./Sidebar";
 import { CaptureBar } from "./CaptureBar";
@@ -8,22 +9,33 @@ import { ListView } from "./ListView";
 import { ClarifyView } from "./ClarifyView";
 import { TodayView } from "./TodayView";
 import { DoingView } from "./DoingView";
-import { NotesView } from "./NotesView";
-import { WeeklyReviewView } from "./WeeklyReviewView";
-import { HabitsView } from "./HabitsView";
-import { AutomationView } from "./AutomationView";
 import { PomodoroDock } from "./PomodoroDock";
-import { TaskDetail } from "./TaskDetail";
-import { AgentPanel } from "./AgentPanel";
 import { ToastViewport } from "./ToastViewport";
-import { CommandPalette } from "./CommandPalette";
-import { LogView } from "./LogView";
 import { ProjectDetailView } from "./ProjectDetailView";
-import { SettingsView } from "./SettingsView";
 import { CoachBar } from "./CoachBar";
 import { triggerUndo } from "@/store/useToast";
 import { checkReminders } from "@/lib/client/reminders";
 import type { ScopeId } from "@/lib/domain/types";
+
+// 低频重组件懒加载：周回顾/设置/日志/笔记等一次都不打开的会话里
+// 完全不用下载。热路径（今天/收件箱/进行中/列表）保持静态打包。
+const NotesView = dynamic(() => import("./NotesView").then((m) => ({ default: m.NotesView })));
+const WeeklyReviewView = dynamic(
+  () => import("./WeeklyReviewView").then((m) => ({ default: m.WeeklyReviewView })),
+);
+const HabitsView = dynamic(() => import("./HabitsView").then((m) => ({ default: m.HabitsView })));
+const AutomationView = dynamic(
+  () => import("./AutomationView").then((m) => ({ default: m.AutomationView })),
+);
+const SettingsView = dynamic(
+  () => import("./SettingsView").then((m) => ({ default: m.SettingsView })),
+);
+const LogView = dynamic(() => import("./LogView").then((m) => ({ default: m.LogView })));
+const CommandPalette = dynamic(
+  () => import("./CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
+const TaskDetail = dynamic(() => import("./TaskDetail").then((m) => ({ default: m.TaskDetail })));
+const AgentPanel = dynamic(() => import("./AgentPanel").then((m) => ({ default: m.AgentPanel })));
 
 /**
  * 导航即生命周期：处理（收件箱→今天→进行中→等待）→ 库存 → 组织 → 结算。

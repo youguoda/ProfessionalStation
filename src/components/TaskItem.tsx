@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -41,7 +42,7 @@ function ageBadge(task: Task, staleDays: number): { text: string; stale: boolean
   return null;
 }
 
-export function TaskItem({
+function TaskItemImpl({
   task,
   meta,
   blocked,
@@ -313,3 +314,10 @@ export function TaskItem({
     </div>
   );
 }
+
+/**
+ * memo：任务行是列表里数量最多的组件。store 更新时 upsert 只替换
+ * 变更的那条（其余引用不变），meta 已由 useTaskMeta 做成稳定 Map，
+ * props 全部浅稳定后未变更的行可以整行跳过重渲染。
+ */
+export const TaskItem = memo(TaskItemImpl);
