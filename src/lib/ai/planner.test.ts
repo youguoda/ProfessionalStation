@@ -18,6 +18,7 @@ beforeEach(() => {
   delete process.env.AI_BASE_URL;
   delete process.env.AI_MODEL;
   delete process.env.AI_TIMEOUT_MS;
+  delete process.env.AI_THINKING_CONTROL;
 });
 
 afterEach(() => {
@@ -46,6 +47,69 @@ describe("getAiConfig", () => {
     expect(getAiConfig().timeoutMs).toBe(5_000);
     process.env.AI_TIMEOUT_MS = "10";
     expect(getAiConfig().timeoutMs).toBe(1_000);
+  });
+});
+
+describe("思考模式控制", () => {
+  function lastBody(): Record<string, unknown> {
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const init = calls[calls.length - 1]?.[1] as RequestInit | undefined;
+    return JSON.parse(String(init?.body ?? "{}"));
+  }
+
+  it("thinkingControl 默认开，AI_THINKING_CONTROL=0 关", () => {
+    expect(getAiConfig().thinkingControl).toBe(true);
+    process.env.AI_THINKING_CONTROL = "0";
+    expect(getAiConfig().thinkingControl).toBe(false);
+    delete process.env.AI_THINKING_CONTROL;
+  });
+
+  it("非流式调用（建议/摘要）始终注入关闭思考", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), {
+          status: 200,
+        }),
+      ),
+    );
+    await chatWithMessages([{ role: "user", content: "x" }]);
+    expect(lastBody().chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it("AI_THINKING_CONTROL=0 时不注入（端点不兼容时逃生）", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    process.env.AI_THINKING_CONTROL = "0";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), {
+          status: 200,
+        }),
+      ),
+    );
+    await chatWithMessages([{ role: "user", content: "x" }]);
+    expect(lastBody().chat_template_kwargs).toBeUndefined();
+    delete process.env.AI_THINKING_CONTROL;
+  });
+
+  it("streamChat：thinking=false 注入关闭；true 不注入（交给服务端默认）", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    const sse = `data: ${JSON.stringify({ choices: [{ delta: { content: "好" } }] })}\n\ndata: [DONE]\n\n`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(sse, { status: 200 })),
+    );
+    for await (const _ of streamChat([{ role: "user", content: "x" }], "s", 0.7, { thinking: false })) {
+      void _;
+    }
+    expect(lastBody().chat_template_kwargs).toEqual({ enable_thinking: false });
+
+    for await (const _ of streamChat([{ role: "user", content: "x" }], "s", 0.7, { thinking: true })) {
+      void _;
+    }
+    expect(lastBody().chat_template_kwargs).toBeUndefined();
   });
 });
 

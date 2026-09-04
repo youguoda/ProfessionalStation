@@ -153,6 +153,7 @@ export function defaultSettings(): Db["settings"] {
     maxDoing: DEFAULT_MAX_DOING,
     staleDays: DEFAULT_STALE_DAYS,
     coachEnabled: true,
+    agentThinking: false,
   };
 }
 

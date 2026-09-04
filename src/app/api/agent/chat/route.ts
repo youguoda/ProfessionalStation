@@ -88,6 +88,7 @@ export async function POST(req: Request) {
             memoryNotes: db.memoryNotes,
             summary,
             userText: text,
+            thinking: db.settings.agentThinking,
           },
           (delta) => send({ type: "token", text: delta }),
           // 思考过程实时转发（推理模型才有；先于正文到达）

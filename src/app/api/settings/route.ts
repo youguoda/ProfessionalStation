@@ -25,6 +25,7 @@ export async function PATCH(req: Request) {
   const staleDays = clampInt(body.staleDays, 1, 90);
   if (staleDays !== undefined) patch.staleDays = staleDays;
   if (typeof body.coachEnabled === "boolean") patch.coachEnabled = body.coachEnabled;
+  if (typeof body.agentThinking === "boolean") patch.agentThinking = body.agentThinking;
 
   if (body.automations && typeof body.automations === "object") {
     const a = body.automations as Record<string, unknown>;

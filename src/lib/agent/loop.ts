@@ -51,6 +51,8 @@ export interface AgentStreamInput {
   memoryNotes: MemoryNote[];
   summary: string;
   userText: string;
+  /** 深度思考开关（settings.agentThinking）：false 时注入参数关闭模型思考 */
+  thinking?: boolean;
 }
 
 export interface StreamReplyResult {
@@ -90,7 +92,7 @@ export async function streamReply(
 
   let reply = "";
   let reasoning = "";
-  for await (const delta of streamChat(messages, system)) {
+  for await (const delta of streamChat(messages, system, 0.7, { thinking: input.thinking })) {
     if (delta.reasoning) {
       reasoning += delta.reasoning;
       onReasoning?.(delta.reasoning);

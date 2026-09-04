@@ -15,11 +15,14 @@ export interface AiConfig {
   jsonMode: boolean;
   /** 单次非流式调用超时（ms）；流式为它的 3 倍——打字机可能持续较久 */
   timeoutMs: number;
+  /** 是否注入 chat_template_kwargs 控制 Qwen3 类模型的思考模式 */
+  thinkingControl: boolean;
 }
 
 export function getAiConfig(): AiConfig {
   const apiKey = process.env.AI_API_KEY;
   const jsonModeRaw = process.env.AI_JSON_MODE;
+  const thinkingControlRaw = process.env.AI_THINKING_CONTROL;
   return {
     enabled: Boolean(apiKey),
     baseUrl: (process.env.AI_BASE_URL ?? "https://api.deepseek.com/v1").replace(/\/+$/, ""),
@@ -28,7 +31,20 @@ export function getAiConfig(): AiConfig {
     // 置 AI_JSON_MODE=0 关掉它：改由 system 提示词要求 JSON，parseJsonLoose 兜底。
     jsonMode: jsonModeRaw !== "0" && jsonModeRaw !== "false",
     timeoutMs: Math.max(1_000, Number(process.env.AI_TIMEOUT_MS) || 60_000),
+    // Qwen3 类推理模型关闭思考可把首 token 从秒级降到亚秒；端点不认
+    // chat_template_kwargs（400）时置 0 停止注入。
+    thinkingControl: thinkingControlRaw !== "0" && thinkingControlRaw !== "false",
   };
+}
+
+/**
+ * 关闭思考的请求体参数。只在明确要关时注入——开启侧交给服务端默认
+ * （部分网关忽略 enable_thinking:true，注入无益）。
+ */
+function noThinkingBody(cfg: AiConfig): Record<string, unknown> {
+  return cfg.thinkingControl
+    ? { chat_template_kwargs: { enable_thinking: false } }
+    : {};
 }
 
 /** 把超时中断翻译成可读的错误，其余异常原样抛出 */
@@ -84,6 +100,8 @@ export async function chatWithMessages(
         ...(format === "json" && cfg.jsonMode
           ? { response_format: { type: "json_object" } }
           : {}),
+        // 建议生成/摘要/记忆提炼都是机械的结构化输出，不需要思考
+        ...noThinkingBody(cfg),
       }),
       // 端点挂起时别让请求无限悬着——聊天 SSE、拆分、摘要全走这里
       signal: AbortSignal.timeout(cfg.timeoutMs),
@@ -118,6 +136,8 @@ export async function* streamChat(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   system?: string,
   temperature = 0.7,
+  /** thinking=false 时注入参数关闭思考（秒回）；true/未设置走服务端默认 */
+  opts: { thinking?: boolean } = {},
 ): AsyncGenerator<StreamDelta> {
   const cfg = getAiConfig();
   if (!cfg.enabled) throw new Error("未配置 AI_API_KEY");
@@ -142,6 +162,7 @@ export async function* streamChat(
         ],
         temperature,
         stream: true,
+        ...(opts.thinking === false ? noThinkingBody(cfg) : {}),
       }),
       signal: AbortSignal.timeout(streamTimeout),
     });

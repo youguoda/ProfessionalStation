@@ -157,6 +157,8 @@ function normalizeDb(raw: Partial<Db>): Db {
         typeof s.coachEnabled === "boolean"
           ? s.coachEnabled
           : defaults.settings.coachEnabled,
+      agentThinking:
+        typeof s.agentThinking === "boolean" ? s.agentThinking : defaults.settings.agentThinking,
       automations: {
         autoClearPlanOnDone:
           s.automations?.autoClearPlanOnDone ??

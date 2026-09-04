@@ -160,6 +160,8 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
   const clearChat = useStore((s) => s.clearChat);
   const setChatMessages = useStore((s) => s.setChatMessages);
   const resolveProposal = useStore((s) => s.resolveProposal);
+  const thinking = useStore((s) => s.settings.agentThinking);
+  const updateSettings = useStore((s) => s.updateSettings);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -420,14 +422,34 @@ export function AgentPanel({ onClose }: { onClose: () => void }) {
                   停止
                 </button>
               ) : (
-                <button
-                  onClick={() => submit()}
-                  disabled={!text.trim() || !aiStatus?.enabled}
-                  className="flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  发送
-                </button>
+                <>
+                  <button
+                    onClick={() =>
+                      updateSettings({ agentThinking: !thinking }).catch((e) => toastError(e))
+                    }
+                    className={`flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
+                      thinking
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    title={
+                      thinking
+                        ? "深度思考已开启：先出思维链再回答，慢但稳（点击关闭，秒回）"
+                        : "深度思考已关闭：秒回（点击开启：复杂问题更稳，但要多等一会）"
+                    }
+                  >
+                    <Brain className="h-3.5 w-3.5" />
+                    深度思考
+                  </button>
+                  <button
+                    onClick={() => submit()}
+                    disabled={!text.trim() || !aiStatus?.enabled}
+                    className="flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    发送
+                  </button>
+                </>
               )}
             </div>
           </div>

@@ -177,6 +177,8 @@ export interface Settings {
   staleDays: number;
   /** 教练模式：允许马力在发现模式时主动开口（一天最多一次） */
   coachEnabled: boolean;
+  /** 马力深度思考（推理模型先出思维链再回答，慢但稳；默认关=秒回） */
+  agentThinking: boolean;
 }
 
 /**

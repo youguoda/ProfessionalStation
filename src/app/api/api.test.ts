@@ -182,6 +182,19 @@ describe("API：设置与项目归档", () => {
     expect(body.staleDays).toBe(14);
   });
 
+  it("PATCH settings 深度思考开关回环，默认关", async () => {
+    const before = await (await getBootstrap()).json();
+    expect(before.settings.agentThinking).toBe(false);
+    const on = await patchSettings(
+      jsonReq("/api/settings", { agentThinking: true }, "PATCH"),
+    );
+    expect((await on.json()).agentThinking).toBe(true);
+    const off = await patchSettings(
+      jsonReq("/api/settings", { agentThinking: false }, "PATCH"),
+    );
+    expect((await off.json()).agentThinking).toBe(false);
+  });
+
   it("PATCH settings 约束值越界时被夹紧", async () => {
     const res = await patchSettings(
       jsonReq("/api/settings", { maxToday: 999, maxDoing: 0, staleDays: -3 }, "PATCH"),
@@ -476,6 +489,36 @@ describe("API：马力 Agent", () => {
     // 落库：done 消息里带思考过程
     const done = events.find((e) => e.type === "done")!;
     expect((done.messages as SseMessages)[1].reasoning).toBe("用户在问身份，简短答。");
+  });
+
+  it("chat 按设置注入思考控制：默认关闭思考，开启后不注入", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    const bodies: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (body.includes('"stream":true')) bodies.push(body);
+        return body.includes('"stream":true')
+          ? new Response(
+              `data: ${JSON.stringify({ choices: [{ delta: { content: "好" } }] })}\n\ndata: [DONE]\n\n`,
+              { status: 200, headers: { "Content-Type": "text/event-stream" } },
+            )
+          : new Response(JSON.stringify({ choices: [{ message: { content: '{"proposals":[]}' } }] }), {
+              status: 200,
+            });
+      }),
+    );
+    // 默认（agentThinking=false）：流式调用注入关闭思考
+    await postAgentChat(jsonReq("/api/agent/chat", { text: "a" }));
+    expect(bodies[0]).toContain("chat_template_kwargs");
+
+    // 开启深度思考：不注入，交给服务端默认
+    await patchSettings(jsonReq("/api/settings", { agentThinking: true }, "PATCH"));
+    await postAgentChat(jsonReq("/api/agent/chat", { text: "b" }));
+    expect(bodies[1]).not.toContain("chat_template_kwargs");
+
+    await patchSettings(jsonReq("/api/settings", { agentThinking: false }, "PATCH"));
   });
 
   it("proposal 状态流转：approve 幂等、未知 404、参数不合法 400", async () => {
