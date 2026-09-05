@@ -61,6 +61,23 @@ function rethrowIfTimeout(e: unknown, ms: number): never {
   throw e;
 }
 
+/** 上游非 2xx：尽量带上上游错误详情（如「余额不足或无可用资源包」），别只剩一个状态码 */
+async function upstreamError(res: Response): Promise<never> {
+  let detail = "";
+  try {
+    const body = (await res.json()) as {
+      error?: { message?: string } | string;
+      message?: string;
+    };
+    const msg =
+      typeof body.error === "string" ? body.error : (body.error?.message ?? body.message);
+    if (msg) detail = `：${String(msg).slice(0, 120)}`;
+  } catch {
+    /* 无可解析的响应体就算了 */
+  }
+  throw new Error(`AI 服务返回错误（HTTP ${res.status}${detail}）`);
+}
+
 /** 调用 OpenAI 兼容 chat/completions，返回消息内容 */
 export async function chatJson(prompt: string, system?: string): Promise<string> {
   return chatWithMessages([{ role: "user", content: prompt }], system, 0.2);
@@ -116,7 +133,7 @@ export async function chatWithMessages(
     rethrowIfTimeout(e, cfg.timeoutMs);
   }
   if (!res.ok) {
-    throw new Error(`AI 服务返回错误（HTTP ${res.status}）`);
+    await upstreamError(res);
   }
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -176,7 +193,7 @@ export async function* streamChat(
     rethrowIfTimeout(e, streamTimeout);
   }
   if (!res.ok) {
-    throw new Error(`AI 服务返回错误（HTTP ${res.status}）`);
+    await upstreamError(res);
   }
   if (!res.body) throw new Error("AI 未返回流式内容");
 

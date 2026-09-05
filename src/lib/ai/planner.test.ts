@@ -115,6 +115,33 @@ describe("思考模式控制", () => {
   });
 });
 
+describe("上游错误透传", () => {
+  it("非 2xx 时带上上游错误详情（如余额不足）", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: { code: "1113", message: "余额不足或无可用资源包,请充值。" } }),
+            { status: 429 },
+          ),
+      ),
+    );
+    await expect(chatWithMessages([{ role: "user", content: "x" }])).rejects.toThrow(
+      /HTTP 429：余额不足/,
+    );
+  });
+
+  it("响应体不可解析时退回纯状态码", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
+    await expect(chatWithMessages([{ role: "user", content: "x" }])).rejects.toThrow(
+      "AI 服务返回错误（HTTP 500）",
+    );
+  });
+});
+
 describe("超时中断", () => {
   it("超时后抛出可读错误而不是无限悬着", async () => {
     process.env.AI_API_KEY = "sk-test";
