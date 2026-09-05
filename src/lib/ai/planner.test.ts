@@ -64,7 +64,7 @@ describe("思考模式控制", () => {
     delete process.env.AI_THINKING_CONTROL;
   });
 
-  it("非流式调用（建议/摘要）始终注入关闭思考", async () => {
+  it("非流式调用（建议/摘要）始终注入关闭思考（Qwen + GLM 双风格）", async () => {
     process.env.AI_API_KEY = "sk-test";
     vi.stubGlobal(
       "fetch",
@@ -76,6 +76,7 @@ describe("思考模式控制", () => {
     );
     await chatWithMessages([{ role: "user", content: "x" }]);
     expect(lastBody().chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(lastBody().thinking).toEqual({ type: "disabled" });
   });
 
   it("AI_THINKING_CONTROL=0 时不注入（端点不兼容时逃生）", async () => {
@@ -105,6 +106,7 @@ describe("思考模式控制", () => {
       void _;
     }
     expect(lastBody().chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(lastBody().thinking).toEqual({ type: "disabled" });
 
     for await (const _ of streamChat([{ role: "user", content: "x" }], "s", 0.7, { thinking: true })) {
       void _;

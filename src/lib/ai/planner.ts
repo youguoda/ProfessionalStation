@@ -38,12 +38,18 @@ export function getAiConfig(): AiConfig {
 }
 
 /**
- * 关闭思考的请求体参数。只在明确要关时注入——开启侧交给服务端默认
- * （部分网关忽略 enable_thinking:true，注入无益）。
+ * 关闭思考的请求体参数。两种风格同时注入，各自只被自家端点认：
+ *   chat_template_kwargs.enable_thinking —— Qwen 系网关（vLLM）
+ *   thinking.type=disabled              —— GLM 系（bigmodel.cn）
+ * 另一侧实测均容忍未知参数（HTTP 200）。只在明确要关时注入——
+ * 开启侧交给服务端默认（部分网关忽略 enable_thinking:true，注入无益）。
  */
 function noThinkingBody(cfg: AiConfig): Record<string, unknown> {
   return cfg.thinkingControl
-    ? { chat_template_kwargs: { enable_thinking: false } }
+    ? {
+        chat_template_kwargs: { enable_thinking: false },
+        thinking: { type: "disabled" },
+      }
     : {};
 }
 
