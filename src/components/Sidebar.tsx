@@ -17,7 +17,6 @@ import {
   PlayCircle,
   Settings,
   Sun,
-  Target,
   Trash2,
   Zap,
   type LucideIcon,
@@ -188,7 +187,9 @@ export function Sidebar() {
           icon={NotebookPen}
           badge={notes.length > 0 ? String(notes.length) : ""}
         />
-        <NavItem id="habits" label="习惯" icon={Target} />
+        {/* 习惯打卡暂缓（2026-09：建了没打过卡）。远期想用时把下面这行
+            加回来即可，数据仍在库里：
+            <NavItem id="habits" label="习惯" icon={Target} /> */}
       </Group>
 
       {/* 结算：每周一次，把悬着的东西了结 */}

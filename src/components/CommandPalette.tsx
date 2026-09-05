@@ -15,7 +15,7 @@ const SCOPE_ITEMS: Array<{ id: ScopeId; label: string }> = [
   { id: "upcoming", label: "未来 7 天" },
   { id: "someday", label: "将来/也许" },
   { id: "notes", label: "笔记" },
-  { id: "habits", label: "习惯" },
+  // 习惯打卡暂缓（2026-09），远期恢复时把 { id: "habits", label: "习惯" } 加回来
   { id: "review", label: "周回顾" },
   { id: "log", label: "已完成日志" },
   { id: "automation", label: "自动化" },

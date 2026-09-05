@@ -13,6 +13,10 @@ import {
 import { toastError } from "@/store/useToast";
 import { PageHeader } from "./TaskList";
 
+/** 复盘笔记引导模板：固定三问，让回顾有据可翻——两周后回看，
+ *  notes 里写下的才是真正学到的东西 */
+const REVIEW_NOTES_TEMPLATE = "本周做得好的：\n\n烂尾或放弃的，以及原因：\n\n下周最重要的一件事：";
+
 const CHECKLIST = [
   "清空收件箱（逐条澄清）",
   "回顾项目清单，确保每个项目都有下一步行动",
@@ -196,11 +200,23 @@ export function WeeklyReviewView({ onSelect }: { onSelect: (id: string) => void 
         </div>
       </section>
 
+      <div className="mb-1 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">复盘笔记</h2>
+        {!notes ? (
+          <button
+            onClick={() => setNotes(REVIEW_NOTES_TEMPLATE)}
+            className="rounded border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+            title="按三问结构填好骨架，逐段补充"
+          >
+            填入引导模板
+          </button>
+        ) : null}
+      </div>
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        rows={4}
-        placeholder="本周复盘与下周重点…"
+        rows={8}
+        placeholder={"本周做得好的：…\n烂尾或放弃的，以及原因：…\n下周最重要的一件事：…"}
         className="mb-3 w-full rounded-lg border bg-background px-3 py-2 text-sm"
       />
 
