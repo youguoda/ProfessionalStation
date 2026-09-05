@@ -48,18 +48,14 @@ export async function POST(req: Request) {
 
   const db = await getDb();
 
-  // 对话摘要滚动窗口：超阈值时把旧消息压缩进 chatSummary
+  // 对话摘要滚动窗口：发送侧只取「最近窗口 + 已有摘要」，压缩在本轮
+  // 回复交付之后进行（见下方 post-done 段）——慢端点上不让摘要的又一次
+  // 排队挡在用户和首 token 之间。还没有摘要时首次全量发送，压缩随后补上。
   let history = db.chatMessages;
   let summary = db.chatSummary;
   const split = splitForSummary(history);
-  if (split) {
-    try {
-      summary = await summarizeChat(summary, split.toSummarize);
-      await setChatSummary(summary);
-      history = split.keep;
-    } catch {
-      /* 摘要失败不阻塞对话 */
-    }
+  if (split && summary.trim()) {
+    history = split.keep;
   }
 
   const stream = new ReadableStream({
@@ -126,6 +122,18 @@ export async function POST(req: Request) {
           }));
           const messages = await appendProposals(assistantMsg.id, mapped);
           if (messages) send({ type: "proposals", messages });
+        }
+
+        // 滚动摘要：回复已交付，这里把旧消息压缩进 chatSummary，供下一轮
+        // 使用（串行在建议调用之后，控制并发）。失败不影响任何已交付内容。
+        try {
+          const savedSplit = splitForSummary(saved);
+          if (savedSplit) {
+            const nextSummary = await summarizeChat(summary, savedSplit.toSummarize);
+            await setChatSummary(nextSummary);
+          }
+        } catch {
+          /* 摘要失败不影响对话 */
         }
 
         // 后台提炼记忆笔记（不阻塞响应）
