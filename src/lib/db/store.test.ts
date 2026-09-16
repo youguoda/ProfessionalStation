@@ -462,6 +462,85 @@ describe("旧数据迁移", () => {
     expect(db.tasks[0].canceledReason).toBeNull();
   });
 
+  it("回收站里残留的「进行中」被修正为待办", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "t1",
+          title: "早就删了但还写着进行中",
+          notes: "",
+          phase: "trash",
+          status: "doing",
+          priority: 3,
+          tags: [],
+          history: [],
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+        },
+        {
+          id: "t2",
+          title: "扔掉的已完成项",
+          notes: "",
+          phase: "trash",
+          status: "done",
+          priority: 3,
+          tags: [],
+          history: [],
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(db.tasks.find((t) => t.id === "t1")!.status).toBe("todo");
+    // done/canceled 是终局，回收站要如实显示它当初的下场
+    expect(db.tasks.find((t) => t.id === "t2")!.status).toBe("done");
+  });
+
+  it("指向已删除功能的历史条目被清掉（看板视图早已下线）", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "t1",
+          title: "x",
+          notes: "",
+          phase: "action",
+          status: "todo",
+          priority: 3,
+          tags: [],
+          history: [
+            { at: "2026-08-21T00:00:00.000Z", label: "澄清了任务" },
+            { at: "2026-08-21T00:01:00.000Z", label: "移动了看板列" },
+            { at: "2026-08-21T00:02:00.000Z", label: "开始执行" },
+          ],
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(db.tasks[0].history.map((h) => h.label)).toEqual(["澄清了任务", "开始执行"]);
+  });
+
+  it("旧数据补齐 awaitingResult 与 lastRitualDay", async () => {
+    const db = await writeLegacy({
+      tasks: [
+        {
+          id: "t1",
+          title: "x",
+          notes: "",
+          phase: "action",
+          status: "doing",
+          priority: 3,
+          tags: [],
+          history: [],
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(db.tasks[0].awaitingResult).toBe(false);
+    expect(db.lastRitualDay).toBeNull();
+  });
+
   it("旧的 autoClearFrogOnDone 迁移为 autoClearPlanOnDone", async () => {
     const db = await writeLegacy({
       tasks: [],
@@ -667,5 +746,53 @@ describe("原子写盘", () => {
     __resetStore();
     const titles = (await store.listTasks()).map((t) => t.title);
     expect(titles).toEqual(["A"]);
+  });
+});
+
+describe("今日开机仪式", () => {
+  it("没做过就是待办，做过当天不再拦", async () => {
+    expect(await store.ritualPending()).toBe(true);
+    const day = await store.completeRitual();
+    expect(day).toBe(isoDay(new Date()));
+    expect(await store.ritualPending()).toBe(false);
+  });
+
+  it("换一天又要重新挑", async () => {
+    await store.completeRitual();
+    const tomorrow = new Date(Date.now() + 86400000);
+    expect(await store.ritualPending(tomorrow)).toBe(true);
+  });
+});
+
+describe("等结果与 WIP 硬拦", () => {
+  it("挂成等结果后腾出的名额可以立刻用掉", async () => {
+    const settings = await store.updateSettings({ maxDoing: 1 });
+    expect(settings.maxDoing).toBe(1);
+
+    const a = await store.createTask({ title: "A", phase: "action" });
+    const b = await store.createTask({ title: "B", phase: "action" });
+    expect((await store.transitionTask(a.id, { type: "start" })).ok).toBe(true);
+
+    // 名额满了，B 开不了
+    const blocked = await store.transitionTask(b.id, { type: "start" });
+    expect(blocked.ok).toBe(false);
+
+    // A 挂成等结果 → 名额腾出来，B 能开了
+    expect((await store.transitionTask(a.id, { type: "awaitResult" })).ok).toBe(true);
+    expect((await store.transitionTask(b.id, { type: "start" })).ok).toBe(true);
+  });
+
+  it("重新上手要重新过 WIP 这道门", async () => {
+    await store.updateSettings({ maxDoing: 1 });
+    const a = await store.createTask({ title: "A", phase: "action" });
+    const b = await store.createTask({ title: "B", phase: "action" });
+    await store.transitionTask(a.id, { type: "start" });
+    await store.transitionTask(a.id, { type: "awaitResult" });
+    await store.transitionTask(b.id, { type: "start" });
+
+    // 名额已被 B 占住：A 想重新上手得先等 B 让位
+    const denied = await store.transitionTask(a.id, { type: "resumeWork" });
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error).toContain("上限");
   });
 });

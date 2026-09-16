@@ -59,7 +59,8 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** 旧数据形态（迁移用）：这些字段已从模型中移除 */
-type LegacyTask = Omit<Task, "phase"> & {
+type LegacyTask = Omit<Task, "phase" | "awaitingResult"> & {
+  awaitingResult?: boolean;
   isFrog?: boolean;
   contexts?: string[];
   durationMinutes?: number;
@@ -73,6 +74,20 @@ type LegacyTask = Omit<Task, "phase"> & {
  *   2. 丢弃已删除字段（isFrog / contexts / durationMinutes）；isFrog=true 迁移为「今天做」
  *   3. phase=reference 的任务转成独立的笔记实体
  */
+/** 已删除功能留在活动历史里的记录标签（看板视图早已下线，记录却还在） */
+const DEAD_HISTORY_LABELS = ["移动了看板列"];
+
+/** 清理指向已删除功能的历史条目——没有出处的记录只会让人困惑 */
+function cleanHistory(history: unknown): Task["history"] {
+  if (!Array.isArray(history)) return [];
+  return history.filter(
+    (h) =>
+      h &&
+      typeof h.label === "string" &&
+      !DEAD_HISTORY_LABELS.some((dead) => h.label.startsWith(dead)),
+  );
+}
+
 function normalizeDb(raw: Partial<Db>): Db {
   const defaults = emptyDb();
   const db = (raw ?? {}) as Omit<Partial<Db>, "tasks"> & { tasks?: LegacyTask[] };
@@ -113,10 +128,14 @@ function normalizeDb(raw: Partial<Db>): Db {
             ? today
             : null,
       startedAt: legacy.startedAt ?? (legacy.status === "doing" ? legacy.updatedAt : null),
+      // 回收站里不该留着「进行中」：老数据的 trash 只改了 phase，status 原样留着，
+      // 点开详情会看到一条「已删除但仍在进行」的任务。
+      status: legacy.phase === "trash" && legacy.status === "doing" ? "todo" : legacy.status,
+      awaitingResult: legacy.awaitingResult === true,
       canceledReason: legacy.canceledReason ?? null,
       nudgedAt: legacy.nudgedAt ?? null,
       tags: Array.isArray(legacy.tags) ? legacy.tags : [],
-      history: Array.isArray(legacy.history) ? legacy.history : [],
+      history: cleanHistory(legacy.history),
     });
   }
 
@@ -147,6 +166,7 @@ function normalizeDb(raw: Partial<Db>): Db {
     memoryNotes: Array.isArray(db.memoryNotes) ? db.memoryNotes : [],
     chatSummary: typeof db.chatSummary === "string" ? db.chatSummary : "",
     lastNudge: normalizeNudge(db.lastNudge),
+    lastRitualDay: typeof db.lastRitualDay === "string" ? db.lastRitualDay : null,
     settings: {
       ...defaults.settings,
       theme: s.theme ?? defaults.settings.theme,
@@ -367,6 +387,8 @@ const EVENT_HISTORY_LABELS: Record<TaskEvent["type"], string> = {
   activate: "提回下一步",
   defer: "放到将来/也许",
   start: "开始执行",
+  awaitResult: "挂起等结果",
+  resumeWork: "重新上手",
   stop: "放回待办",
   complete: "完成",
   reopen: "重新打开",
@@ -390,12 +412,13 @@ export async function transitionTask(id: string, event: TaskEvent): Promise<Tran
     if (idx < 0) return { ok: false as const, error: "任务不存在" };
     const task = db.tasks[idx];
 
-    if (event.type === "start") {
+    if (event.type === "start" || event.type === "resumeWork") {
       // 依赖阻断
-      if (isBlocked(task, db.tasks)) {
+      if (event.type === "start" && isBlocked(task, db.tasks)) {
         return { ok: false as const, error: "存在未完成的依赖任务，无法开始" };
       }
-      // 在制品上限：这是看板唯一值钱的约束，硬拦
+      // 在制品上限：这是看板唯一值钱的约束，硬拦。
+      // 「重新上手」等于重新占一个名额，走同一道门。
       const cap = doingCapacity(db.tasks, db.settings);
       if (cap.used >= cap.max) {
         return {
@@ -738,6 +761,26 @@ export async function resetTaskData(): Promise<{ tasks: number; notes: number }>
 }
 
 // ---- Coach（马力主动开口） ----
+
+// ---- 今日开机仪式 ----
+
+/**
+ * 今天是否还没做开机仪式。
+ * Ivy Lee 的药效全在「事前挑」这个动作上——事后补记等于没吃药，
+ * 所以这一屏挡在主界面前面，一天一次。
+ */
+export async function ritualPending(now: Date = new Date()): Promise<boolean> {
+  const db = await getDb();
+  return db.lastRitualDay !== isoDay(now);
+}
+
+/** 记下今天已经挑过了，当天不再拦 */
+export async function completeRitual(now: Date = new Date()): Promise<string> {
+  return mutate((db) => {
+    db.lastRitualDay = isoDay(now);
+    return db.lastRitualDay;
+  });
+}
 
 export async function getLastNudge(): Promise<CoachNudge | null> {
   const db = await readDb();

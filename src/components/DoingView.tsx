@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Check, Square } from "lucide-react";
+import { Check, Hourglass, Play, Square } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { blockedIdSet, daysSince, doingCapacity, selectDoing } from "@/lib/engine/selectors";
 import { useTaskMeta } from "@/lib/client/useTaskMeta";
@@ -45,6 +45,35 @@ export function DoingView({ onSelect }: { onSelect: (id: string) => void }) {
     }
   }
 
+  async function awaitResult(id: string, title: string) {
+    try {
+      await transition(id, { type: "awaitResult" });
+      toastWithUndo({
+        title: `「${title}」挂成等结果`,
+        desc: `让出一个在制名额，已进行天数照常累计`,
+        undo: () => {
+          transition(id, { type: "resumeWork" }).catch((e) => toastError(e));
+        },
+      });
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
+  async function resumeWork(id: string, title: string) {
+    try {
+      await transition(id, { type: "resumeWork" });
+      toastWithUndo({
+        title: `重新上手「${title}」`,
+        undo: () => {
+          transition(id, { type: "awaitResult" }).catch((e) => toastError(e));
+        },
+      });
+    } catch (e) {
+      toastError(e);
+    }
+  }
+
   async function stop(id: string, title: string) {
     try {
       await transition(id, { type: "stop" });
@@ -61,7 +90,10 @@ export function DoingView({ onSelect }: { onSelect: (id: string) => void }) {
 
   return (
     <div>
-      <PageHeader title="进行中" subtitle="球在我手上的事。库存无限，在制有限。">
+      <PageHeader
+        title="进行中"
+        subtitle="球在我手上的事。库存无限，在制有限——等机器跑的不算在我手上。"
+      >
         <div className="text-right">
           <div
             className={`text-sm font-semibold tabular-nums ${
@@ -103,10 +135,18 @@ export function DoingView({ onSelect }: { onSelect: (id: string) => void }) {
           {list.map((t) => {
             const days = daysSince(t.startedAt);
             const stale = days >= settings.staleDays;
+            // 等结果 = 跑的不是我：灰掉、虚线框，一眼能从真正在做的事里分出来
+            const waiting = t.awaitingResult;
             return (
               <div
                 key={t.id}
-                className={`rounded-xl border p-1 ${stale ? "border-warning/50 bg-warning/5" : ""}`}
+                className={`rounded-xl border p-1 ${
+                  waiting
+                    ? "border-dashed bg-muted/30 opacity-60 transition-opacity hover:opacity-100"
+                    : stale
+                      ? "border-warning/50 bg-warning/5"
+                      : ""
+                }`}
               >
                 <TaskItem
                   task={t}
@@ -122,6 +162,25 @@ export function DoingView({ onSelect }: { onSelect: (id: string) => void }) {
                     <Check className="h-3 w-3" />
                     完成
                   </button>
+                  {waiting ? (
+                    <button
+                      onClick={() => resumeWork(t.id, t.title)}
+                      className="flex items-center gap-1 rounded-md border border-primary/40 px-2.5 py-1 text-xs text-primary hover:bg-primary/5"
+                      title="结果回来了，重新占一个在制名额"
+                    >
+                      <Play className="h-3 w-3" />
+                      重新上手
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => awaitResult(t.id, t.title)}
+                      className="flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+                      title="活还在跑，但跑的不是我——让出在制名额"
+                    >
+                      <Hourglass className="h-3 w-3" />
+                      等结果
+                    </button>
+                  )}
                   <button
                     onClick={() => stop(t.id, t.title)}
                     className="flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
@@ -129,13 +188,19 @@ export function DoingView({ onSelect }: { onSelect: (id: string) => void }) {
                     <Square className="h-3 w-3" />
                     放回待办
                   </button>
-                  <button
-                    onClick={() => pomodoroStart(t.id)}
-                    className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
-                  >
-                    {focusTaskId === t.id ? "🍅 专注中" : "🍅 专注"}
-                  </button>
-                  {stale ? (
+                  {!waiting ? (
+                    <button
+                      onClick={() => pomodoroStart(t.id)}
+                      className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
+                    >
+                      {focusTaskId === t.id ? "🍅 专注中" : "🍅 专注"}
+                    </button>
+                  ) : null}
+                  {waiting ? (
+                    <span className="ml-auto text-[11px] text-muted-foreground">
+                      等结果 {days} 天 · 不占名额
+                    </span>
+                  ) : stale ? (
                     <span className="ml-auto text-[11px] text-warning">
                       开始 {days} 天了 — 周回顾会让你结算它
                     </span>

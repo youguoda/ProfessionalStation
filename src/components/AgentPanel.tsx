@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/store/useStore";
 import { api } from "@/lib/client/api";
-import { proposalLabel } from "@/lib/agent/tools";
+import { PROPOSAL_FIELDS, proposalLabel, type ProposalField } from "@/lib/agent/tools";
 import { executeProposalTool } from "@/lib/agent/execute";
 import type { ActionProposal, ChatMessage } from "@/lib/domain/types";
+import { PRIORITY_LABELS } from "@/lib/domain/constants";
 import { AgentSettings } from "./AgentSettings";
 import { toast, toastError } from "@/store/useToast";
 import { Markdown } from "@/lib/markdown";
@@ -48,6 +49,63 @@ function ThinkingBlock({ text, live = false }: { text: string; live?: boolean })
   );
 }
 
+/** 一个可改字段的输入控件 */
+function FieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: ProposalField;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const str = value === null || value === undefined ? "" : String(value);
+
+  if (field.type === "priority") {
+    return (
+      <select
+        value={str || "3"}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full rounded border bg-background px-1.5 py-1 text-xs"
+      >
+        {([1, 2, 3, 4] as const).map((p) => (
+          <option key={p} value={p}>
+            {PRIORITY_LABELS[p]}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <textarea
+        value={str}
+        rows={2}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded border bg-background px-1.5 py-1 text-xs"
+      />
+    );
+  }
+
+  const inputType =
+    field.type === "date" ? "date" : field.type === "datetime" ? "datetime-local" : "text";
+  return (
+    <input
+      type={inputType}
+      value={field.type === "datetime" ? str.slice(0, 16) : str}
+      onChange={(e) => onChange(e.target.value || (field.nullable ? null : ""))}
+      className="w-full rounded border bg-background px-1.5 py-1 text-xs"
+    />
+  );
+}
+
+/**
+ * 建议卡片（HITL）。
+ *
+ * 马力给的是建议不是指令：方向对、细节不对是常态，所以每种建议都能就地改，
+ * 改完再执行。只能「全盘接受或忽略」的卡片，实际使用中只会被忽略。
+ */
 function ProposalCard({
   message,
   proposal,
@@ -56,23 +114,31 @@ function ProposalCard({
   proposal: ActionProposal;
 }) {
   const resolveProposal = useStore((s) => s.resolveProposal);
+  const tasks = useStore((s) => s.tasks);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(
-    typeof proposal.args.title === "string" ? proposal.args.title : "",
-  );
+  const [args, setArgs] = useState<Record<string, unknown>>(proposal.args);
 
   const done = proposal.status !== "pending";
-  const editable = proposal.tool === "create_task";
+  const fields = PROPOSAL_FIELDS[proposal.tool] ?? [];
+  const editable = fields.length > 0;
+  const titleOf = (id: string) => tasks.find((t) => t.id === id)?.title;
+  const targetTitle =
+    typeof proposal.args.taskId === "string" ? titleOf(proposal.args.taskId) : undefined;
+  const dirty = fields.some((f) => args[f.key] !== proposal.args[f.key]);
 
   async function execute() {
     if (busy || done) return;
     setBusy(true);
     setError(null);
     try {
-      const override = editable && editing ? { title: title.trim() || proposal.args.title } : undefined;
-      await executeProposalTool(proposal, override);
+      // 只把改动过的字段作为覆盖传下去，没碰过的保持马力的原样
+      const override: Record<string, unknown> = {};
+      for (const f of fields) {
+        if (args[f.key] !== proposal.args[f.key]) override[f.key] = args[f.key];
+      }
+      await executeProposalTool(proposal, Object.keys(override).length ? override : undefined);
       await resolveProposal(message.id, proposal.id, "approved");
     } catch (e) {
       setError(e instanceof Error ? e.message : "执行失败");
@@ -94,30 +160,37 @@ function ProposalCard({
         </span>
       </div>
 
-      {editable && proposal.status === "pending" ? (
-        <div className="mt-1">
-          {editing ? (
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  setEditing(false);
-                }
-              }}
-              className="w-full rounded border bg-background px-1.5 py-1 text-xs"
-            />
-          ) : (
-            <span className="block text-[11px] text-muted-foreground">
-              操作：{proposalLabel(proposal)}
-            </span>
-          )}
+      <div className="mt-0.5 text-[11px] text-muted-foreground">
+        操作：{proposalLabel({ ...proposal, args }, titleOf)}
+        {dirty ? <span className="ml-1 text-primary">（已改）</span> : null}
+      </div>
+
+      {editing && !done ? (
+        <div className="mt-2 space-y-1.5 rounded-md border border-dashed p-2">
+          {targetTitle ? (
+            <div className="text-[11px] text-muted-foreground">
+              目标任务：<span className="text-foreground">{targetTitle}</span>
+            </div>
+          ) : null}
+          {fields.map((f) => (
+            <label key={f.key} className="block">
+              <span className="mb-0.5 block text-[10px] text-muted-foreground">{f.label}</span>
+              <FieldInput
+                field={f}
+                value={args[f.key]}
+                onChange={(v) => setArgs((prev) => ({ ...prev, [f.key]: v }))}
+              />
+            </label>
+          ))}
+          <button
+            onClick={() => setArgs(proposal.args)}
+            disabled={!dirty}
+            className="text-[10px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-40"
+          >
+            还原马力的原建议
+          </button>
         </div>
-      ) : (
-        <div className="mt-0.5 text-[11px] text-muted-foreground">
-          操作：{proposalLabel(proposal)}
-        </div>
-      )}
+      ) : null}
 
       {proposal.status === "pending" ? (
         <div className="mt-2 flex items-center gap-2">
@@ -125,10 +198,10 @@ function ProposalCard({
             <button
               onClick={() => setEditing((v) => !v)}
               className="flex items-center gap-0.5 rounded-md border px-2 py-1 text-xs"
-              title="修改后执行"
+              title="改完再执行"
             >
               <Pencil className="h-3 w-3" />
-              {editing ? "完成编辑" : "修改"}
+              {editing ? "收起" : "修改"}
             </button>
           ) : null}
           <button
@@ -136,7 +209,7 @@ function ProposalCard({
             disabled={busy}
             className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
           >
-            {busy ? "执行中…" : "✓ 执行"}
+            {busy ? "执行中…" : dirty ? "✓ 按我改的执行" : "✓ 执行"}
           </button>
           <button
             onClick={() =>

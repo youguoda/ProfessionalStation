@@ -26,6 +26,8 @@ import {
   doingCapacity,
   needsWeeklyReview,
   selectInbox,
+  selectSettlement,
+  selectStaleDoing,
   selectWaiting,
   todayCapacity,
 } from "@/lib/engine/selectors";
@@ -63,8 +65,18 @@ export function Sidebar() {
   const inboxCount = selectInbox(tasks).length;
   const today = todayCapacity(tasks, settings);
   const doing = doingCapacity(tasks, settings);
-  const reviewDue = needsWeeklyReview(weeklyReviews);
   const theme = settings.theme;
+
+  /*
+   * 侧边栏要会说话。
+   * 「系统在烂而你不知道」是最要命的失败模式——停滞项、待结算的欠账，
+   * 以前只有主动点进周回顾才看得见。现在它们直接顶在导航上。
+   */
+  const staleDoing = selectStaleDoing(tasks, settings.staleDays).length;
+  const settlementCount = selectSettlement(tasks, settings).length;
+  const reviewDue = needsWeeklyReview(weeklyReviews);
+  // 收件箱堆过 10 条就不再是缓冲区，是垃圾堆
+  const inboxPiling = inboxCount >= 10;
 
   const NavItem = ({
     id,
@@ -142,6 +154,7 @@ export function Sidebar() {
           label="收件箱"
           icon={Inbox}
           badge={inboxCount > 0 ? String(inboxCount) : ""}
+          tone={inboxPiling ? "warning" : "default"}
         />
         <NavItem
           id="today"
@@ -154,8 +167,12 @@ export function Sidebar() {
           id="doing"
           label="进行中"
           icon={PlayCircle}
-          badge={`${doing.used}/${doing.max}`}
-          tone={doing.over ? "danger" : "default"}
+          badge={
+            staleDoing > 0
+              ? `${doing.used}/${doing.max} · ${staleDoing} 停滞`
+              : `${doing.used}/${doing.max}`
+          }
+          tone={doing.over || staleDoing > 0 ? "danger" : "default"}
         />
         <NavItem
           id="waiting"
@@ -198,8 +215,8 @@ export function Sidebar() {
           id="review"
           label="周回顾"
           icon={CheckCircle2}
-          badge={reviewDue ? "!" : ""}
-          tone="danger"
+          badge={settlementCount > 0 ? String(settlementCount) : reviewDue ? "!" : ""}
+          tone={settlementCount > 0 || reviewDue ? "danger" : "default"}
         />
         <NavItem id="log" label="已完成日志" icon={LayoutList} />
       </Group>

@@ -144,6 +144,45 @@ export async function proposeAgentActions(
  * 教练层的「开口」环节：把一条客观观察，用人格说成一句话。
  * AI 未配置或调用失败时返回 null，由调用方降级到 observer 的本地兜底文案。
  */
+/**
+ * 替用户起草周复盘笔记。
+ * 有 AI 就让马力按人格写；没有（或失败）由调用方用 fallbackReviewDraft 兜底——
+ * 两条路都给**有内容的初稿**，因为空白框才是复盘写不出来的原因。
+ */
+export async function generateReviewDraft(input: {
+  profile: AgentProfile;
+  facts: string;
+  context: string;
+  memoryNotes: MemoryNote[];
+}): Promise<string | null> {
+  if (!getAiConfig().enabled) return null;
+  try {
+    const system = assembleSystemPrompt(
+      input.profile,
+      input.context,
+      "",
+      memoryTextOf(input.memoryNotes, input.facts),
+      "review",
+      "",
+    );
+    const content = await chatWithMessages(
+      [
+        {
+          role: "user",
+          content: `这是我这一周的数据：\n\n${input.facts}\n\n按三段给我起个草，我在你的基础上改。`,
+        },
+      ],
+      system,
+      0.7,
+      "text", // 三段纯文本，不要被 JSON 包一层
+    );
+    const text = content.trim();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateNudge(input: {
   profile: AgentProfile;
   evidence: string;

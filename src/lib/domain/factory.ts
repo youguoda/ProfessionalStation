@@ -50,6 +50,7 @@ export function createTask(input: NewTaskInput): Task {
     startDate: input.startDate ?? null,
     scheduledAt: input.scheduledAt ?? null,
     startedAt: null,
+    awaitingResult: false,
     completedAt: input.completedAt ?? null,
     canceledReason: null,
     projectId: input.projectId ?? null,
@@ -174,5 +175,6 @@ export function emptyDb(): Db {
     memoryNotes: [],
     chatSummary: "",
     lastNudge: null,
+    lastRitualDay: null,
   };
 }

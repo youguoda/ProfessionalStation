@@ -412,3 +412,31 @@ describe("wouldCreateCycle 成环检测", () => {
     expect(wouldCreateCycle(a.id, b.id, [a, b])).toBe(false);
   });
 });
+
+describe("等结果不占在制品名额", () => {
+  const settings = { maxDoing: 3 };
+  const running = (title: string, awaiting = false) => ({
+    ...createTask({ title, phase: "action", status: "doing" }),
+    startedAt: new Date().toISOString(),
+    awaitingResult: awaiting,
+  });
+
+  it("WIP 只数真正占我注意力的那些", () => {
+    const tasks = [running("我在写"), running("机器在跑", true), running("机器也在跑", true)];
+    // 三条都在「进行中」页面上，但只有一条占名额
+    expect(selectDoing(tasks)).toHaveLength(3);
+    expect(doingCapacity(tasks, settings).used).toBe(1);
+    expect(doingCapacity(tasks, settings).remaining).toBe(2);
+  });
+
+  it("等结果的排在列表末尾（界面上它们是灰的）", () => {
+    const tasks = [running("机器在跑", true), running("我在写")];
+    expect(selectDoing(tasks).map((t) => t.awaitingResult)).toEqual([false, true]);
+  });
+
+  it("等结果照样会被停滞判定拎出来", () => {
+    const old = new Date(Date.now() - 20 * 86400000).toISOString();
+    const tasks = [{ ...running("挂了 20 天", true), startedAt: old }];
+    expect(selectStaleDoing(tasks, 7)).toHaveLength(1);
+  });
+});

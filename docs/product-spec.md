@@ -144,6 +144,19 @@ Settings maxToday=6, maxDoing=3, staleDays=7, theme, automations
 
 **核心不变量**：视图层不允许绕过引擎直接改状态；所有失败都要经 toast 说明原因。
 
+## 7.5 开机仪式与「等结果」
+
+**开机仪式**：当天第一次进入应用，主界面前挡一屏「今天做哪 N 件」——左侧库存、
+右侧空槽，挑完才进。`db.lastRitualDay` 记录最近一次完成的日期，与今天不同即拦。
+Ivy Lee 的作用机制是**事前挑**，`start` 事件自动补 `plannedFor` 只是事后记录，
+补不出承诺。逃生口（「今天什么都不挑」）永远可点——仪式不是牢笼，但要你明确地选一次。
+
+**等结果**（`Task.awaitingResult`）：活在跑，但跑的不是我（等机器/构建/上游）。
+它仍在「进行中」列表里（灰显、沉底），但 `doingCapacity` 不数它——WIP 约束的是
+**我的注意力**，不是世界上正在发生的事。`startedAt` 不重置，停滞判定照常生效。
+`resumeWork` 重新占名额，因此与 `start` 走同一道 WIP 硬拦。
+所有离开 doing 的出口（stop/complete/cancel/trash/defer/reopen）都会清掉该标记。
+
 ## 8. 自动化的边界
 
 自动化只做**机械清理**，不替用户做决定：
@@ -163,6 +176,18 @@ Settings maxToday=6, maxDoing=3, staleDays=7, theme, automations
 1. **观察**（纯函数，不调 LLM）：从任务数据与活动历史里识别 11 类模式，按严重度排序。
 2. **开口**（LLM，`nudge` 模式）：把最狠的那一条客观事实，用人格说成一句话。调用失败时降级到 observer 里写好的兜底文案——**兜底文案同样是他那张嘴**。
 3. **呈现**：主内容区顶部一行，可「回他一句」（打开对话）、跳到那条任务、或直接关掉。
+
+除主动开口外，马力还承担两处**出力**的活（都遵循「只给草稿，人来定稿」）：
+
+- **任务拆分**（`aiBreakdown`）：信息不足时先反问一个问题（返回 `question`），
+  用户答过一轮后必须给清单。产出是草稿，在拆分台里逐条改完才落库。
+  盲拆出来的子任务通常只是把主标题换个说法。
+- **复盘起草**（`generateReviewDraft`，`review` 模式）：按本周事实写出三段初稿。
+  AI 不可用时由 `fallbackReviewDraft` 用真实数据本地拼一份——**兜底也必须有内容**，
+  空白框正是复盘长期写不出来的原因。
+
+建议卡片全部**可改再执行**（`PROPOSAL_FIELDS` 声明每种工具的可改字段）：
+方向对、细节不对是常态，不能改的建议只会被忽略。
 
 **三条红线（在 API 层强制）**：
 
@@ -188,7 +213,12 @@ Settings maxToday=6, maxDoing=3, staleDays=7, theme, automations
 - 删除 vs 归档：`trash` 软删除可恢复；转存笔记同样保留可恢复。
 - 重复/循环依赖：子任务不能成为祖先；`blockedBy` 不允许成环。
 - 并发：单用户，乐观更新 + 失败回滚，服务端为准。
-- 旧数据：`normalizeDb` 负责迁移（`reference` → Note、`isFrog` → `plannedFor`、丢弃 `contexts`/`durationMinutes`、`autoClearFrogOnDone` → `autoClearPlanOnDone`）。
+- 旧数据：`normalizeDb` 负责迁移（`reference` → Note、`isFrog` → `plannedFor`、丢弃 `contexts`/`durationMinutes`、`autoClearFrogOnDone` → `autoClearPlanOnDone`、补齐 `awaitingResult`/`lastRitualDay`）。
+- 回收站的状态残留：旧的 `trash` 只改 `phase`，`status` 仍是 `doing`，详情里会看到
+  「已删除但仍在进行」。现在 `trash` 把 doing 退回 todo（done/canceled 是终局，保留原样），
+  迁移一并修正历史数据。
+- 指向已删除功能的活动历史（如看板视图留下的「移动了看板列」）在迁移时清除——
+  没有出处的记录只会让人困惑。
 - 自然语言解析失败：回退「无日期 + 手动选」，不阻塞捕获。
 
 ## 10. 测试与验收

@@ -329,3 +329,93 @@ describe("transitionMany 批量应用", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("状态机：等结果（跑的不是我）", () => {
+  const doing = () => {
+    const r = transitionMany(createTask({ title: "跑量化", phase: "action" }), [
+      { type: "start" },
+    ]);
+    if (!r.ok) throw new Error(r.error);
+    return r.task;
+  };
+
+  it("进行中的任务可以挂成等结果，计时起点不被重置", () => {
+    const t = doing();
+    const r = transition(t, { type: "awaitResult" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.awaitingResult).toBe(true);
+      expect(r.task.status).toBe("doing");
+      // 等结果也是在耗时间：startedAt 必须原样保留，停滞判定才拎得出来
+      expect(r.task.startedAt).toBe(t.startedAt);
+    }
+  });
+
+  it("只有进行中的任务能挂等结果", () => {
+    const r = transition(createTask({ title: "x", phase: "action" }), { type: "awaitResult" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("不能重复挂", () => {
+    const r = transitionMany(doing(), [{ type: "awaitResult" }, { type: "awaitResult" }]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("重新上手清掉标记，回到真正的在制品", () => {
+    const r = transitionMany(doing(), [{ type: "awaitResult" }, { type: "resumeWork" }]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.awaitingResult).toBe(false);
+      expect(r.task.status).toBe("doing");
+    }
+  });
+
+  it("没挂等结果时不能重新上手", () => {
+    const r = transition(doing(), { type: "resumeWork" });
+    expect(r.ok).toBe(false);
+  });
+
+  it("每一个离开 doing 的出口都会清掉等结果标记", () => {
+    for (const event of [
+      { type: "stop" } as const,
+      { type: "complete" } as const,
+      { type: "cancel" } as const,
+      { type: "trash" } as const,
+      { type: "defer" } as const,
+    ]) {
+      const r = transitionMany(doing(), [{ type: "awaitResult" }, event]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.task.awaitingResult).toBe(false);
+    }
+  });
+});
+
+describe("状态机：回收站不留「进行中」", () => {
+  it("扔掉正在做的任务，状态退回 todo", () => {
+    const r = transitionMany(createTask({ title: "x", phase: "action" }), [
+      { type: "start" },
+      { type: "trash" },
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.task.phase).toBe("trash");
+      // 既不在做，也不占名额——不该还挂着「进行中」
+      expect(r.task.status).toBe("todo");
+      expect(r.task.startedAt).toBeNull();
+    }
+  });
+
+  it("已完成/已取消是终局，扔进回收站保留原状态", () => {
+    for (const [event, expected] of [
+      [{ type: "complete" } as const, "done"],
+      [{ type: "cancel" } as const, "canceled"],
+    ] as const) {
+      const r = transitionMany(createTask({ title: "x", phase: "action" }), [
+        event,
+        { type: "trash" },
+      ]);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.task.status).toBe(expected);
+    }
+  });
+});

@@ -77,6 +77,41 @@ export const AGENT_TOOLS: ToolDef[] = [
   },
 ];
 
+/** 建议卡片里可以就地改的字段类型 */
+export type ProposalFieldType = "text" | "textarea" | "date" | "datetime" | "priority";
+
+export interface ProposalField {
+  key: string;
+  label: string;
+  type: ProposalFieldType;
+  /** 允许清空（存 null） */
+  nullable?: boolean;
+}
+
+/**
+ * 每种建议可以改哪些字段。
+ *
+ * 马力给的是**建议**，不是指令——不能改的建议只有「接受」和「忽略」两条路，
+ * 而真实情况几乎总是「方向对，细节不对」。能改，接受率才有意义。
+ *
+ * taskId 不在可改之列：它是一个不透明 id，手敲没有意义，改目标不如重开一条。
+ */
+export const PROPOSAL_FIELDS: Record<AgentToolName, ProposalField[]> = {
+  create_task: [
+    { key: "title", label: "标题", type: "text" },
+    { key: "dueDate", label: "截止日", type: "date", nullable: true },
+    { key: "priority", label: "优先级", type: "priority" },
+  ],
+  complete_task: [],
+  reschedule_task: [
+    { key: "dueDate", label: "截止日", type: "date", nullable: true },
+    { key: "scheduledAt", label: "固定时刻", type: "datetime", nullable: true },
+  ],
+  set_priority: [{ key: "priority", label: "优先级", type: "priority" }],
+  plan_today: [{ key: "day", label: "承诺日", type: "date", nullable: true }],
+  add_note: [{ key: "note", label: "备注", type: "textarea" }],
+};
+
 export function toolsPrompt(): string {
   return AGENT_TOOLS.map((t) => `- ${t.name}：${t.description}。参数 ${t.params}`).join("\n");
 }
@@ -96,23 +131,32 @@ export function validateProposal(raw: unknown): ParsedProposal | null {
   return { tool: def.name, args: parsed.data as Record<string, unknown>, summary };
 }
 
-/** 建议摘要的中文描述（用于卡片展示与回执消息） */
-export function proposalLabel(p: ParsedProposal): string {
+/**
+ * 建议摘要的中文描述（用于卡片展示与回执消息）。
+ * titleOf 把 taskId 翻成任务标题——卡片上印一串 uuid 等于没说。
+ */
+export function proposalLabel(
+  p: ParsedProposal,
+  titleOf?: (taskId: string) => string | undefined,
+): string {
+  const id = String(p.args.taskId ?? "");
+  const target = titleOf?.(id);
+  const ref = target ? `「${target}」` : `#${id.slice(0, 8)}`;
   switch (p.tool) {
     case "create_task":
       return `新建任务「${String(p.args.title ?? "")}」`;
     case "complete_task":
-      return `完成任务 #${String(p.args.taskId ?? "")}`;
+      return `完成任务 ${ref}`;
     case "reschedule_task":
-      return `调整任务 #${String(p.args.taskId ?? "")} 的时间`;
+      return `调整任务 ${ref} 的时间`;
     case "set_priority":
-      return `把任务 #${String(p.args.taskId ?? "")} 设为 P${String(p.args.priority ?? "")}`;
+      return `把任务 ${ref} 设为 P${String(p.args.priority ?? "")}`;
     case "plan_today":
       return p.args.day
-        ? `把任务 #${String(p.args.taskId ?? "")} 放进 ${String(p.args.day)} 的清单`
-        : `把任务 #${String(p.args.taskId ?? "")} 移出今天`;
+        ? `把任务 ${ref} 放进 ${String(p.args.day)} 的清单`
+        : `把任务 ${ref} 移出今天`;
     case "add_note":
-      return `给任务 #${String(p.args.taskId ?? "")} 追加备注`;
+      return `给任务 ${ref} 追加备注`;
     default:
       return p.summary;
   }

@@ -28,6 +28,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   bootstrap: () => request<Db>("/api/bootstrap"),
 
+  /** 记下今天已经做过开机仪式，当天不再拦 */
+  finishRitual: () =>
+    request<{ day: string; pending: boolean }>("/api/ritual", { method: "POST" }),
+
   createTask: (input: Record<string, unknown>) =>
     request<Task>("/api/tasks", { method: "POST", body: JSON.stringify(input) }),
 
@@ -119,11 +123,23 @@ export const api = {
   aiStatus: () =>
     request<{ enabled: boolean; model: string; baseUrl: string | null }>("/api/ai/status"),
 
-  aiBreakdown: (title: string, notes: string) =>
-    request<{ titles: string[] }>("/api/ai/breakdown", {
+  /**
+   * 任务拆分。turns 是拆分前的来回对话——信息不够时马力会先反问一句，
+   * 把背景问清楚再拆，返回 question；够了就返回 titles。
+   */
+  aiBreakdown: (
+    title: string,
+    notes: string,
+    turns: Array<{ role: "assistant" | "user"; content: string }> = [],
+  ) =>
+    request<{ question: string | null; titles: string[] }>("/api/ai/breakdown", {
       method: "POST",
-      body: JSON.stringify({ title, notes }),
+      body: JSON.stringify({ title, notes, turns }),
     }),
+
+  /** 让马力按本周数据起一份复盘笔记初稿（AI 不可用时本地兜底，一样有内容） */
+  reviewDraft: () =>
+    request<{ draft: string; byAi: boolean }>("/api/agent/review-draft", { method: "POST" }),
 
   /** 教练层：取今天该说的那一句（大多数日子是 null） */
   coachNudge: () => request<{ nudge: CoachNudge | null }>("/api/agent/nudge"),

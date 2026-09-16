@@ -23,6 +23,10 @@ export type TaskEvent =
   /** 搁置：action → someday（决定近期不推进，放回孵化器） */
   | { type: "defer" }
   | { type: "start" }
+  /** 等结果：活还在跑，但跑的不是我——让出 WIP 名额，计时不停 */
+  | { type: "awaitResult" }
+  /** 重新上手：从「等结果」回到真正的在制品，重新占用 WIP 名额 */
+  | { type: "resumeWork" }
   /** 放回待办：把在制品退回库存，不算失败 */
   | { type: "stop" }
   | { type: "complete" }
@@ -55,7 +59,7 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
         return err(`只有收件箱中的任务才能被澄清（当前：${task.phase}）`);
       }
       const status = event.target === "action" ? "todo" : task.status;
-      return ok({ ...task, phase: event.target, status });
+      return ok({ ...task, phase: event.target, status, awaitingResult: false });
     }
 
     case "activate": {
@@ -65,7 +69,7 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
       if (task.status === "done" || task.status === "canceled") {
         return err(`任务已${task.status === "done" ? "完成" : "取消"}，请使用「重新打开」`);
       }
-      return ok({ ...task, phase: "action", status: "todo", waitingFor: null });
+      return ok({ ...task, phase: "action", status: "todo", waitingFor: null, awaitingResult: false });
     }
 
     case "defer": {
@@ -76,7 +80,14 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
         return err(`任务已${task.status === "done" ? "完成" : "取消"}，请使用「重新打开」`);
       }
       // 搁置即释放占用的所有额度：在制品名额与今天的承诺
-      return ok({ ...task, phase: "someday", status: "todo", startedAt: null, plannedFor: null });
+      return ok({
+        ...task,
+        phase: "someday",
+        status: "todo",
+        startedAt: null,
+        plannedFor: null,
+        awaitingResult: false,
+      });
     }
 
     case "start": {
@@ -86,14 +97,32 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
       if (task.status === "doing") {
         return err("任务已在进行中");
       }
-      return ok({ ...task, status: "doing", startedAt: nowIso() });
+      return ok({ ...task, status: "doing", startedAt: nowIso(), awaitingResult: false });
+    }
+
+    case "awaitResult": {
+      if (task.status !== "doing") {
+        return err("只有进行中的任务才能挂成「等结果」");
+      }
+      if (task.awaitingResult) {
+        return err("任务已经在等结果了");
+      }
+      // 计时不重置：等结果也是在耗时间，停滞判定照常把它拎出来
+      return ok({ ...task, awaitingResult: true });
+    }
+
+    case "resumeWork": {
+      if (!task.awaitingResult) {
+        return err("任务不在「等结果」状态");
+      }
+      return ok({ ...task, status: "doing", awaitingResult: false });
     }
 
     case "stop": {
       if (task.status !== "doing") {
         return err("只有进行中的任务才能放回待办");
       }
-      return ok({ ...task, status: "todo", startedAt: null });
+      return ok({ ...task, status: "todo", startedAt: null, awaitingResult: false });
     }
 
     case "complete": {
@@ -103,14 +132,26 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
       if (task.status === "done") {
         return err("任务已完成");
       }
-      return ok({ ...task, status: "done", completedAt: nowIso(), startedAt: null });
+      return ok({
+        ...task,
+        status: "done",
+        completedAt: nowIso(),
+        startedAt: null,
+        awaitingResult: false,
+      });
     }
 
     case "reopen": {
       if (task.status !== "done" && task.status !== "canceled") {
         return err("只有已完成/已取消的任务才能重新打开");
       }
-      return ok({ ...task, status: "todo", completedAt: null, canceledReason: null });
+      return ok({
+        ...task,
+        status: "todo",
+        completedAt: null,
+        canceledReason: null,
+        awaitingResult: false,
+      });
     }
 
     case "cancel": {
@@ -126,6 +167,7 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
         completedAt: nowIso(),
         startedAt: null,
         canceledReason: event.reason?.trim() || null,
+        awaitingResult: false,
       });
     }
 
@@ -133,14 +175,23 @@ export function transition(task: Task, event: TaskEvent): TransitionResult {
       if (task.phase === "trash") {
         return err("任务已在回收站");
       }
-      return ok({ ...task, phase: "trash", plannedFor: null, startedAt: null });
+      // 扔进回收站的东西不该还挂着「进行中」——它既不在做，也不占名额。
+      // done/canceled 是终局，保留原状态，回收站才能如实显示它当初的下场。
+      return ok({
+        ...task,
+        phase: "trash",
+        status: task.status === "doing" ? "todo" : task.status,
+        plannedFor: null,
+        startedAt: null,
+        awaitingResult: false,
+      });
     }
 
     case "restore": {
       if (task.phase !== "trash") {
         return err("只有回收站中的任务才能恢复");
       }
-      return ok({ ...task, phase: "inbox", status: "todo" });
+      return ok({ ...task, phase: "inbox", status: "todo", awaitingResult: false });
     }
 
     default: {

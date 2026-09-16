@@ -255,18 +255,63 @@ export function parseJsonLoose(text: string): unknown {
 }
 
 /** 用 LLM 把任务拆成子任务标题（3–7 条，动词开头） */
-export async function aiBreakdown(title: string, notes: string): Promise<string[]> {
+/** 拆分前的一轮对话：马力问、我答 */
+export interface BreakdownTurn {
+  role: "assistant" | "user";
+  content: string;
+}
+
+export interface BreakdownResult {
+  /** 信息不够时先反问一句（此时 titles 为空）；够了就是 null */
+  question: string | null;
+  titles: string[];
+}
+
+/**
+ * 任务拆分。
+ *
+ * 不再是「一按就拆」——盲拆出来的子任务通常只是把标题换了个说法。
+ * 信息不足时先让马力反问一句，把背景问清楚再拆；已经问过一轮就必须给清单，
+ * 免得变成没完没了的对话。
+ */
+export async function aiBreakdown(
+  title: string,
+  notes: string,
+  turns: BreakdownTurn[] = [],
+): Promise<BreakdownResult> {
   if (!getAiConfig().enabled) throw new Error("未配置 AI_API_KEY，请在 .env 中设置");
+
+  const answered = turns.some((t) => t.role === "user" && t.content.trim());
+  const dialogue = turns.length
+    ? `\n\n已经聊过的背景：\n${turns
+        .map((t) => `${t.role === "assistant" ? "你问" : "我答"}：${t.content}`)
+        .join("\n")}`
+    : "";
+
+  const askClause = answered
+    ? `背景已经问过了，这一轮**必须**给出清单：{"question":null,"titles":["子任务1","子任务2"]}。`
+    : `如果信息不足以拆准，先只问**一个**最关键的问题：{"question":"你的问题","titles":[]}；` +
+      `信息够了就直接给清单：{"question":null,"titles":["子任务1","子任务2"]}。`;
+
   const content = await chatJson(
-    `请把下面这个任务拆成可执行的子任务清单。\n任务标题：${title}\n备注：${notes || "（无）"}\n\n输出 JSON 格式：{"titles":["子任务1","子任务2"]}，3 到 7 条，简洁、动词开头、可独立执行。`,
+    `请把下面这个任务拆成可执行的子任务清单。\n任务标题：${title}\n备注：${
+      notes || "（无）"
+    }${dialogue}\n\n${askClause}\n清单 3 到 7 条，简洁、动词开头、可独立执行。只输出 JSON。`,
   );
-  const parsed = parseJsonLoose(content) as { titles?: unknown } | null;
+
+  const parsed = parseJsonLoose(content) as { titles?: unknown; question?: unknown } | null;
   const titles = Array.isArray(parsed?.titles)
     ? parsed!.titles
         .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
         .map((t) => t.trim())
         .slice(0, 8)
     : [];
-  if (titles.length === 0) throw new Error("AI 未返回有效的子任务清单");
-  return titles;
+  const question =
+    typeof parsed?.question === "string" && parsed.question.trim()
+      ? parsed.question.trim().slice(0, 300)
+      : null;
+
+  // 既没问题也没清单 = 这次调用什么都没产出
+  if (titles.length === 0 && !question) throw new Error("AI 未返回有效的子任务清单");
+  return { question: titles.length > 0 ? null : question, titles };
 }

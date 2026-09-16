@@ -36,6 +36,8 @@ const CommandPalette = dynamic(
 );
 const TaskDetail = dynamic(() => import("./TaskDetail").then((m) => ({ default: m.TaskDetail })));
 const AgentPanel = dynamic(() => import("./AgentPanel").then((m) => ({ default: m.AgentPanel })));
+// 开机仪式一天只出现一次，不进热路径打包
+const RitualView = dynamic(() => import("./RitualView").then((m) => ({ default: m.RitualView })));
 
 /**
  * 导航即生命周期：处理（收件箱→今天→进行中→等待）→ 库存 → 组织 → 结算。
@@ -81,6 +83,7 @@ export function App() {
   const openTask = useStore((s) => s.openTask);
   const closeTask = useStore((s) => s.closeTask);
   const tasks = useStore((s) => s.tasks);
+  const ritualPending = useStore((s) => s.ritualPending);
 
   useEffect(() => {
     load();
@@ -139,6 +142,21 @@ export function App() {
       <div className="flex h-screen items-center justify-center text-muted-foreground">
         加载中…
       </div>
+    );
+  }
+
+  /*
+   * 今日开机仪式挡在主界面前面。
+   * Ivy Lee 的作用机制就是「事前挑」这个动作——让它成为进门必经的一步，
+   * 而不是一个需要你想起来才会去点的功能。一天一次，挑完当天不再出现。
+   */
+  if (ritualPending) {
+    // ToastViewport 一起挂上：仪式屏里的保存失败也要能说明原因
+    return (
+      <>
+        <RitualView />
+        <ToastViewport />
+      </>
     );
   }
 

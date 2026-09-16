@@ -88,7 +88,21 @@ export function selectNextActions(tasks: Task[]): Task[] {
 export function selectDoing(tasks: Task[]): Task[] {
   return tasks
     .filter((t) => t.phase === "action" && t.status === "doing")
-    .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+    .sort((a, b) => {
+      // 等结果的沉到底部：它们在界面上是灰的，不该抢占视线
+      if (a.awaitingResult !== b.awaitingResult) return a.awaitingResult ? 1 : -1;
+      return (a.startedAt ?? "").localeCompare(b.startedAt ?? "");
+    });
+}
+
+/** 真正占用我注意力的在制品（排除「等结果」） */
+export function selectActiveDoing(tasks: Task[]): Task[] {
+  return selectDoing(tasks).filter((t) => !t.awaitingResult);
+}
+
+/** 挂在「等结果」上的任务（跑的不是我） */
+export function selectAwaitingResult(tasks: Task[]): Task[] {
+  return selectDoing(tasks).filter((t) => t.awaitingResult);
 }
 
 export function selectWaiting(tasks: Task[]): Task[] {
@@ -162,7 +176,9 @@ export function doingCapacity(
   tasks: Task[],
   settings: Pick<Settings, "maxDoing">,
 ): Capacity {
-  const used = selectDoing(tasks).length;
+  // WIP 约束的是「我的注意力」，不是「世界上正在发生的事」：
+  // 等结果的任务在跑，但跑的不是我，不占名额。
+  const used = selectActiveDoing(tasks).length;
   const max = settings.maxDoing;
   return { used, max, remaining: Math.max(0, max - used), over: used > max };
 }

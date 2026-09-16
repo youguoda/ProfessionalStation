@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Hand, Hourglass, Square, X } from "lucide-react";
+import { ArrowRight, Check, Hand, Hourglass, Sparkles, Square, X } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { api } from "@/lib/client/api";
 import {
@@ -13,9 +13,6 @@ import {
 import { toastError } from "@/store/useToast";
 import { PageHeader } from "./TaskList";
 
-/** 复盘笔记引导模板：固定三问，让回顾有据可翻——两周后回看，
- *  notes 里写下的才是真正学到的东西 */
-const REVIEW_NOTES_TEMPLATE = "本周做得好的：\n\n烂尾或放弃的，以及原因：\n\n下周最重要的一件事：";
 
 const CHECKLIST = [
   "清空收件箱（逐条澄清）",
@@ -40,6 +37,7 @@ export function WeeklyReviewView({ onSelect }: { onSelect: (id: string) => void 
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const loadedDraft = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,6 +68,27 @@ export function WeeklyReviewView({ onSelect }: { onSelect: (id: string) => void 
   const stats = useMemo(() => selectReviewStats(tasks, projects), [tasks, projects]);
   const settlement = useMemo(() => selectSettlement(tasks, settings), [tasks, settings]);
   const q2 = useMemo(() => selectImportantNotUrgent(tasks).slice(0, 5), [tasks]);
+
+  /**
+   * 让马力起个草。
+   *
+   * 空白框 + 提示模板这条路已经被证伪了：模板填进去，笔记还是 0 字。
+   * 起草把动作从「写」降到「改」——删改一份有内容的初稿，比从头写便宜得多。
+   */
+  async function draft() {
+    if (drafting) return;
+    setDrafting(true);
+    try {
+      const { draft } = await api.reviewDraft();
+      // 已经写了东西就往下接，不覆盖你写过的字
+      setNotes((prev) => (prev.trim() ? `${prev.trim()}\n\n${draft}` : draft));
+      loadedDraft.current = true;
+    } catch (e) {
+      toastError(e);
+    } finally {
+      setDrafting(false);
+    }
+  }
 
   async function submit() {
     try {
@@ -202,15 +221,15 @@ export function WeeklyReviewView({ onSelect }: { onSelect: (id: string) => void 
 
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-sm font-semibold">复盘笔记</h2>
-        {!notes ? (
-          <button
-            onClick={() => setNotes(REVIEW_NOTES_TEMPLATE)}
-            className="rounded border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-            title="按三问结构填好骨架，逐段补充"
-          >
-            填入引导模板
-          </button>
-        ) : null}
+        <button
+          onClick={draft}
+          disabled={drafting}
+          className="flex items-center gap-1 rounded border px-2 py-0.5 text-xs text-primary hover:bg-primary/5 disabled:opacity-50"
+          title="按本周的任务变化和你们聊过的内容，直接写出三段初稿，你只管改"
+        >
+          <Sparkles className="h-3 w-3" />
+          {drafting ? "马力在写…" : "让马力起个草"}
+        </button>
       </div>
       <textarea
         value={notes}

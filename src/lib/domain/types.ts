@@ -39,6 +39,12 @@ export interface Task {
   scheduledAt: string | null;
   /** 进入 doing 的时刻，用于「已进行 N 天」 */
   startedAt: string | null;
+  /**
+   * 等结果：任务在跑，但跑的不是我（等机器/等构建/等上游）。
+   * 仍留在「进行中」，计时照跑，但**不占 WIP 名额**——
+   * 在制品上限约束的是「我的注意力」，不是「世界上正在发生的事」。
+   */
+  awaitingResult: boolean;
   completedAt: string | null;
   /** 取消原因（终局之一：有意识地决定不做） */
   canceledReason: string | null;
@@ -267,4 +273,10 @@ export interface Db {
   chatSummary: string;
   /** 马力最近一次主动开口（用于「一天最多一次」的节流） */
   lastNudge: CoachNudge | null;
+  /**
+   * 最近一次完成「今日开机仪式」的日期（ISO date）。
+   * 与今天不同 = 今天还没挑过，进主界面前先弹仪式屏。
+   * Ivy Lee 的药效全在「事前挑」这个动作上，事后补记等于没吃药。
+   */
+  lastRitualDay: string | null;
 }

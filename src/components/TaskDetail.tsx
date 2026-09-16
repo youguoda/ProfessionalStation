@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Hand, NotebookPen, Play, Square, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Hand,
+  Hourglass,
+  NotebookPen,
+  Play,
+  Square,
+  X,
+} from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { EFFORT_OPTIONS, PHASE_LABELS, STATUS_LABELS } from "@/lib/domain/constants";
 import { REPEAT_OPTIONS } from "@/lib/domain/repeat";
@@ -9,11 +18,11 @@ import { daysSince, isBlocked, isoDay, waitingSince } from "@/lib/engine/selecto
 import { splitCapture } from "@/lib/parsing/capture";
 import { formatRelativeDate } from "@/lib/parsing/dateFormat";
 import type { Priority } from "@/lib/domain/types";
-import { api } from "@/lib/client/api";
 import { usePomodoro } from "@/store/usePomodoro";
 import { toastError, toastWithUndo } from "@/store/useToast";
 import { Markdown } from "@/lib/markdown";
 import { SearchSelect } from "./SearchSelect";
+import { BreakdownPanel } from "./BreakdownPanel";
 
 export function TaskDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -41,7 +50,7 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [tagInput, setTagInput] = useState("");
   const [depError, setDepError] = useState("");
-  const [splitting, setSplitting] = useState(false);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [previewNotes, setPreviewNotes] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [canceling, setCanceling] = useState(false);
@@ -80,25 +89,11 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
     }
   };
 
-  const splitNotes = async () => {
-    if (splitting) return;
-    const lines = splitCapture(task.notes);
-    let titles: string[] = [];
-    if (aiStatus?.enabled) {
-      setSplitting(true);
-      try {
-        const result = await api.aiBreakdown(task.title, task.notes);
-        titles = result.titles;
-      } catch {
-        titles = []; // AI 失败时降级到本地按行拆分
-      } finally {
-        setSplitting(false);
-      }
-    }
-    const items = titles.length > 0 ? titles : lines;
-    if (items.length === 0) return;
+  /** 把一组标题落成子任务（继承主任务的项目/领域/优先级） */
+  const createSubtasks = async (titles: string[]) => {
+    if (titles.length === 0) return;
     await Promise.all(
-      items.map((line) =>
+      titles.map((line) =>
         addTask({
           title: line,
           notes: "",
@@ -109,7 +104,20 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           parentId: task.id,
         }),
       ),
-    ).catch((e) => toastError(e));
+    );
+  };
+
+  /**
+   * 拆分入口。
+   * 有 AI：开拆分台——先交流背景，出草稿，逐条改完再落库。
+   * 无 AI：按备注的行直接拆（本地兜底，行为不变）。
+   */
+  const splitNotes = async () => {
+    if (aiStatus?.enabled) {
+      setBreakdownOpen(true);
+      return;
+    }
+    await createSubtasks(splitCapture(task.notes)).catch((e) => toastError(e));
   };
 
   const addTag = async (value: string) => {
@@ -171,8 +179,10 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
       >
         <div className="mb-4 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            {PHASE_LABELS[task.phase]} · {STATUS_LABELS[task.status]}
+            {PHASE_LABELS[task.phase]} ·{" "}
+            {task.status === "doing" && task.awaitingResult ? "等结果" : STATUS_LABELS[task.status]}
             {task.status === "doing" ? ` · 已进行 ${daysSince(task.startedAt)} 天` : ""}
+            {task.awaitingResult ? " · 不占在制名额" : ""}
             {task.phase === "waiting" && !done
               ? ` · 已等 ${daysSince(waitingSince(task))} 天`
               : ""}
@@ -218,6 +228,33 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
               >
                 完成
               </button>
+              {/*
+                等结果：活在跑，但跑的不是我（等机器/等构建/等上游）。
+                占着在制名额的应该是「我的注意力」，不是「世界上正在发生的事」。
+              */}
+              {task.awaitingResult ? (
+                <button
+                  onClick={() =>
+                    transition(task.id, { type: "resumeWork" }).catch((e) => toastError(e))
+                  }
+                  className="flex items-center gap-1 rounded-md border border-primary/40 px-3 py-1.5 text-xs text-primary"
+                  title="结果回来了，重新上手——会重新占用一个在制名额"
+                >
+                  <Play className="h-3 w-3" />
+                  重新上手
+                </button>
+              ) : (
+                <button
+                  onClick={() =>
+                    transition(task.id, { type: "awaitResult" }).catch((e) => toastError(e))
+                  }
+                  className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs"
+                  title="活还在跑，但跑的不是我——让出在制名额，已进行天数照常累计"
+                >
+                  <Hourglass className="h-3 w-3" />
+                  等结果
+                </button>
+              )}
               <button
                 onClick={() => transition(task.id, { type: "stop" }).catch((e) => toastError(e))}
                 className="flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs"
@@ -549,10 +586,15 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
               </button>
               <button
                 onClick={splitNotes}
-                disabled={splitting || (!aiStatus?.enabled && splitCapture(task.notes).length === 0)}
+                disabled={!aiStatus?.enabled && splitCapture(task.notes).length === 0}
                 className="text-primary disabled:opacity-40"
+                title={
+                  aiStatus?.enabled
+                    ? "先跟马力说清背景，拆出草稿再逐条改"
+                    : "按备注的每一行拆成子任务"
+                }
               >
-                {splitting ? "AI 拆分中…" : aiStatus?.enabled ? "AI 拆分" : "拆分为子任务"}
+                {aiStatus?.enabled ? "AI 拆分" : "拆分为子任务"}
               </button>
             </span>
           </div>
@@ -671,6 +713,14 @@ export function TaskDetail({ id, onClose }: { id: string; onClose: () => void })
           )}
         </div>
       </div>
+
+      {breakdownOpen ? (
+        <BreakdownPanel
+          task={task}
+          onCreate={createSubtasks}
+          onClose={() => setBreakdownOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

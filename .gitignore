@@ -30,3 +30,6 @@ next-env.d.ts
 
 # testing
 /coverage
+
+# 运行日志（nohup npm run start 产生）
+nohup.out

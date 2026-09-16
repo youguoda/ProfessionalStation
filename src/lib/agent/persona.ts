@@ -11,7 +11,7 @@ import type { AgentProfile } from "@/lib/domain/types";
  *   - proposals：根据对话补生成操作建议 JSON
  */
 
-export type SystemMode = "chat" | "reply" | "proposals" | "nudge";
+export type SystemMode = "chat" | "reply" | "proposals" | "nudge" | "review";
 
 export interface PersonaTemplate {
   id: string;
@@ -130,6 +130,14 @@ export const OUTPUT_RULES: Record<SystemMode, string[]> = {
   ],
   proposals: [
     '只输出 JSON 对象：{"proposals":[{"tool":"...","args":{...},"summary":"..."}]}。没有建议时 proposals 为 []。',
+  ],
+  review: [
+    "本轮你在替用户起草**周复盘笔记的初稿**，不是在聊天：他会在你的草稿上改，所以要具体、可改，别写套话。",
+    "严格按三段输出，纯文本，不要 JSON、不要标题层级、不要项目符号以外的标记：",
+    "本周做得好的：\n…\n\n烂尾或放弃的，以及原因：\n…\n\n下周最重要的一件事：\n…",
+    "只用给出的事实：点名具体任务和数字。事实里没有的不要编。",
+    "「原因」那一段如果数据里看不出原因，就把问题留给他（写成「原因：」让他自己补），不要替他瞎猜。",
+    "第三段只写**一件**事，要能直接动手。",
   ],
 };
 

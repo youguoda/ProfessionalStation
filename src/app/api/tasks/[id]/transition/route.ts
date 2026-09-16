@@ -7,6 +7,8 @@ const EVENT_TYPES = [
   "activate",
   "defer",
   "start",
+  "awaitResult",
+  "resumeWork",
   "stop",
   "complete",
   "reopen",

@@ -191,12 +191,41 @@ describe("aiBreakdown（mock fetch）", () => {
   it("解析 titles", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockFetch('{"titles":["收集数据","整理要点","撰写初稿"]}');
-    expect(await aiBreakdown("写周报", "")).toEqual(["收集数据", "整理要点", "撰写初稿"]);
+    expect(await aiBreakdown("写周报", "")).toEqual({
+      question: null,
+      titles: ["收集数据", "整理要点", "撰写初稿"],
+    });
+  });
+
+  it("信息不足时先反问，不给清单", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockFetch('{"question":"这周报是给谁看的？","titles":[]}');
+    expect(await aiBreakdown("写周报", "")).toEqual({
+      question: "这周报是给谁看的？",
+      titles: [],
+    });
+  });
+
+  it("已经答过一轮就以清单为准，question 被丢弃", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockFetch('{"question":"还想再问一句","titles":["收集数据"]}');
+    expect(
+      await aiBreakdown("写周报", "", [
+        { role: "assistant", content: "给谁看？" },
+        { role: "user", content: "给老板" },
+      ]),
+    ).toEqual({ question: null, titles: ["收集数据"] });
   });
 
   it("AI 返回无效内容时抛错", async () => {
     process.env.AI_API_KEY = "sk-test";
     mockFetch("抱歉，我无法处理。");
+    await expect(aiBreakdown("写周报", "")).rejects.toThrow("AI 未返回有效的子任务清单");
+  });
+
+  it("既没问题也没清单时抛错", async () => {
+    process.env.AI_API_KEY = "sk-test";
+    mockFetch('{"question":"","titles":[]}');
     await expect(aiBreakdown("写周报", "")).rejects.toThrow("AI 未返回有效的子任务清单");
   });
 });

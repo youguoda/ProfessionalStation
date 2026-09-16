@@ -19,6 +19,7 @@ import type {
 } from "@/lib/domain/types";
 import type { TaskEvent } from "@/lib/engine/stateMachine";
 import { applyTheme } from "@/lib/client/theme";
+import { isoDay } from "@/lib/engine/selectors";
 import { defaultSettings } from "@/lib/domain/factory";
 
 interface AppState {
@@ -44,8 +45,12 @@ interface AppState {
 
   scope: ScopeId;
   search: string;
+  /** 今天还没做开机仪式 = 主界面前面挡一屏「今天做哪 N 件」 */
+  ritualPending: boolean;
 
   load: () => Promise<void>;
+  /** 挑完（或明确跳过）：记下今天已做，放行进主界面 */
+  finishRitual: () => Promise<void>;
   setScope: (scope: ScopeId) => void;
   setSearch: (q: string) => void;
 
@@ -136,6 +141,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   scope: "today",
   search: "",
+  // 加载完成前不弹仪式屏：还不知道今天挑没挑过
+  ritualPending: false,
 
   load: async () => {
     set({ loading: true, error: null });
@@ -159,6 +166,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiStatus,
         agentProfile,
         chatMessages,
+        ritualPending: db.lastRitualDay !== isoDay(new Date()),
         loaded: true,
         loading: false,
       });
@@ -170,6 +178,11 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "加载失败", loading: false });
     }
+  },
+
+  finishRitual: async () => {
+    await api.finishRitual();
+    set({ ritualPending: false });
   },
 
   setScope: (scope) => set({ scope, search: "" }),
