@@ -511,16 +511,25 @@ export async function convertTaskToNote(id: string): Promise<{ note: Note; task:
   });
 }
 
+/**
+ * 删除：不在回收站的先软删除（可恢复），已在回收站的永久移除。
+ *
+ * 软删除必须走状态机的 trash 事件——这里曾经自己拼对象，只清了 plannedFor，
+ * 于是「已删除但状态还是进行中」的任务就是这么造出来的。
+ * 视图层不允许绕过 engine 改状态，仓储层同样不允许。
+ */
 export async function deleteTask(id: string): Promise<boolean> {
   return mutate((db) => {
     const idx = db.tasks.findIndex((t) => t.id === id);
     if (idx < 0) return false;
     const t = db.tasks[idx];
-    if (t.phase !== "trash") {
-      db.tasks[idx] = { ...t, phase: "trash", plannedFor: null, updatedAt: nowIso() };
-    } else {
+    if (t.phase === "trash") {
       db.tasks.splice(idx, 1);
+      return true;
     }
+    const result = transition(t, { type: "trash" });
+    if (!result.ok) return false;
+    db.tasks[idx] = pushHistory(result.task, EVENT_HISTORY_LABELS.trash);
     return true;
   });
 }

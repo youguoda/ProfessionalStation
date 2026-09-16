@@ -796,3 +796,40 @@ describe("等结果与 WIP 硬拦", () => {
     if (!denied.ok) expect(denied.error).toContain("上限");
   });
 });
+
+describe("删除走状态机，不留状态残渣", () => {
+  it("软删除正在做的任务：状态退回 todo，计时与等结果一并清掉", async () => {
+    const t = await store.createTask({ title: "在做的", phase: "action" });
+    await store.transitionTask(t.id, { type: "start" });
+    await store.transitionTask(t.id, { type: "awaitResult" });
+
+    expect(await store.deleteTask(t.id)).toBe(true);
+
+    const after = (await store.listTasks()).find((x) => x.id === t.id)!;
+    expect(after.phase).toBe("trash");
+    // 回收站里的东西既不在做，也不占名额——这条曾经被 deleteTask 绕过去
+    expect(after.status).toBe("todo");
+    expect(after.startedAt).toBeNull();
+    expect(after.awaitingResult).toBe(false);
+    expect(after.plannedFor).toBeNull();
+    expect(after.history.at(-1)?.label).toBe("移入回收站");
+  });
+
+  it("软删除不吃在制名额：删掉后名额立刻释放", async () => {
+    await store.updateSettings({ maxDoing: 1 });
+    const a = await store.createTask({ title: "A", phase: "action" });
+    const b = await store.createTask({ title: "B", phase: "action" });
+    await store.transitionTask(a.id, { type: "start" });
+    expect((await store.transitionTask(b.id, { type: "start" })).ok).toBe(false);
+
+    await store.deleteTask(a.id);
+    expect((await store.transitionTask(b.id, { type: "start" })).ok).toBe(true);
+  });
+
+  it("已在回收站的再删一次就是永久移除", async () => {
+    const t = await store.createTask({ title: "x", phase: "action" });
+    await store.deleteTask(t.id);
+    await store.deleteTask(t.id);
+    expect((await store.listTasks()).find((x) => x.id === t.id)).toBeUndefined();
+  });
+});

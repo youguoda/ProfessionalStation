@@ -230,11 +230,15 @@ export const useStore = create<AppState>((set, get) => ({
     if (prev.phase === "trash") {
       set({ tasks: get().tasks.filter((t) => t.id !== id) });
     } else {
+      // 与服务端 trash 事件保持一致：回收站里的东西既不在做，也不占名额
       set({
         tasks: upsert(get().tasks, {
           ...prev,
           phase: "trash",
+          status: prev.status === "doing" ? "todo" : prev.status,
           plannedFor: null,
+          startedAt: null,
+          awaitingResult: false,
           updatedAt: new Date().toISOString(),
         }),
       });
