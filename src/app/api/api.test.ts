@@ -21,6 +21,9 @@ import { POST as postAgentProposalStatus } from "./agent/proposals/route";
 import { GET as getNudge, POST as postNudgeDismiss } from "./agent/nudge/route";
 import { GET as exportRoute } from "./export/route";
 import { GET as getReviews, PATCH as patchReviewDraft } from "./reviews/route";
+import { GET as getAgentView } from "./agent/view/route";
+import { GET as getAgentObserve } from "./agent/observe/route";
+import { GET as getRitual, POST as postRitual } from "./ritual/route";
 
 const ts = createTempStore();
 beforeEach(() => ts.reset());
@@ -677,5 +680,84 @@ describe("API：导出 / 周回顾草稿 / 承诺日", () => {
       { params: Promise.resolve({ id: t.id as string }) },
     );
     expect((await cleared.json()).plannedFor).toBeNull();
+  });
+});
+
+describe("agent 视图（给 Hermes 上的马力读）", () => {
+  it("复用 selectors 的投影，容量与清单口径一致", async () => {
+    const a = await create({ title: "在做的", phase: "action" });
+    const b = await create({ title: "等机器的", phase: "action" });
+    await create({ title: "库存里的", phase: "action" });
+    await postTransition(jsonReq(`/api/tasks/${a.id}/transition`, { type: "start" }), {
+      params: Promise.resolve({ id: a.id }),
+    });
+    await postTransition(jsonReq(`/api/tasks/${b.id}/transition`, { type: "start" }), {
+      params: Promise.resolve({ id: b.id }),
+    });
+    await postTransition(jsonReq(`/api/tasks/${b.id}/transition`, { type: "awaitResult" }), {
+      params: Promise.resolve({ id: b.id }),
+    });
+
+    const data = await (await getAgentView(new Request("http://test/api/agent/view"))).json();
+
+    // 两条都在「进行中」，但等结果的不占名额
+    expect(data.doing).toHaveLength(2);
+    expect(data.awaiting).toHaveLength(1);
+    expect(data.capacity.doing.used).toBe(1);
+    expect(data.awaiting[0].awaiting).toBe(true);
+    // ref 是短 id，agent 用它回指
+    expect(data.doing[0].ref).toHaveLength(8);
+    expect(data.doing[0].id.startsWith(data.doing[0].ref)).toBe(true);
+  });
+
+  it("scope 参数只返回那一段", async () => {
+    await create({ title: "收件箱里的" });
+    const res = await getAgentView(new Request("http://test/api/agent/view?scope=inbox"));
+    const data = await res.json();
+    expect(Object.keys(data)).toEqual(["inbox"]);
+    expect(data.inbox).toHaveLength(1);
+  });
+
+  it("未知 scope 返回 400 并列出可用值", async () => {
+    const res = await getAgentView(new Request("http://test/api/agent/view?scope=nope"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("today");
+  });
+});
+
+describe("agent 观察端点（cron 监视用）", () => {
+  it("没有模式成立时输出固定文本——大多数日子应该是这样", async () => {
+    const res = await getAgentObserve(new Request("http://test/api/agent/observe"));
+    expect(await res.text()).toBe("quiet\n");
+  });
+
+  it("输出不带日期：同一模式持续成立时哈希不变，cron 才会保持静默", async () => {
+    for (let i = 0; i < 4; i++) await create({ title: `活 ${i}`, phase: "action" });
+    const once = await (await getAgentObserve(new Request("http://test/api/agent/observe"))).text();
+    const twice = await (await getAgentObserve(new Request("http://test/api/agent/observe"))).text();
+    expect(once).toBe(twice);
+    // 带上日期就会每天变出新哈希 = 每天唠叨一次，正是「罕见」要防的事
+    expect(once).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("教练模式关掉后闭嘴", async () => {
+    await patchSettings(jsonReq("/api/settings", { coachEnabled: false }, "PATCH"));
+    const res = await getAgentObserve(new Request("http://test/api/agent/observe"));
+    expect(await res.text()).toBe("coach-disabled\n");
+  });
+
+  it("format=json 给出全部成立的模式供判断整体状况", async () => {
+    const res = await getAgentObserve(new Request("http://test/api/agent/observe?format=json"));
+    const data = await res.json();
+    expect(data).toHaveProperty("all");
+    expect(data.coachEnabled).toBe(true);
+  });
+});
+
+describe("开机仪式接口", () => {
+  it("没做过是 pending，POST 之后当天不再拦", async () => {
+    expect((await (await getRitual()).json()).pending).toBe(true);
+    await postRitual();
+    expect((await (await getRitual()).json()).pending).toBe(false);
   });
 });

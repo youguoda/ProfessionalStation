@@ -1,0 +1,22 @@
+# 马力的 Hermes profile 配置。
+#
+# 凭据不写在这里：PS 的 Basic Auth 走环境变量
+# （PS_BASE_URL / PS_AUTH_USER / PS_AUTH_PASS），见 deploy/hermes/README.md。
+#
+# model 段按你工作本上 ~/.hermes/config.yaml 已有的 provider 填。
+# 下面是内网 Qwen 的例子——照抄 model-test-agents 的 custom_providers 命名。
+model:
+  default: Qwen3.5-122B
+  provider: custom:api.studio.iluvatar.ai
+  context_length: 256000
+
+# 只要终端：马力靠 pstation CLI 读写任务系统，不需要 file/web/kanban。
+# 工具越少，他越不容易跑偏去干本职之外的事。
+toolsets:
+  - terminal
+
+agent:
+  environment_hint: >-
+    个人任务系统教练。任务数据在开发服务器的 ProfessionalStation 上，
+    用 personal/professional-station skill 的 pstation CLI 读写。
+    先拿数据再开口，不许凭记忆回答任务状态。

@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""ProfessionalStation CLI —— 给 Hermes 上的马力读写任务系统。
+
+只用标准库：工作本上不需要 pip install 任何东西。
+
+配置（环境变量）：
+    PS_BASE_URL    默认 http://10.112.9.44:3000
+    PS_AUTH_USER   HTTP Basic Auth 用户名（PS 的 middleware 要求）
+    PS_AUTH_PASS   HTTP Basic Auth 密码
+
+刻意不叫 `ps`：那会和系统的进程命令撞名。
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+DEFAULT_BASE = "http://10.112.9.44:3000"
+TIMEOUT = 30
+
+# 友好名 → 状态机事件。事件名是 PS 引擎的真相源，这里只做翻译，不做逻辑。
+EVENTS = {
+    "start": "start",
+    "done": "complete",
+    "complete": "complete",
+    "stop": "stop",
+    "await": "awaitResult",
+    "resume": "resumeWork",
+    "cancel": "cancel",
+    "trash": "trash",
+    "restore": "restore",
+    "reopen": "reopen",
+    "activate": "activate",
+    "defer": "defer",
+}
+
+SCOPES = [
+    "today",
+    "overdue",
+    "doing",
+    "awaiting",
+    "next",
+    "inbox",
+    "waiting",
+    "settlement",
+]
+
+
+class PsError(Exception):
+    """带可读原因的失败。铁则：API 不可用就报告端点与原因，绝不猜测。"""
+
+
+def base_url() -> str:
+    return os.environ.get("PS_BASE_URL", DEFAULT_BASE).rstrip("/")
+
+
+def request(method: str, path: str, body: dict | None = None) -> object:
+    url = f"{base_url()}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+
+    user = os.environ.get("PS_AUTH_USER")
+    password = os.environ.get("PS_AUTH_PASS")
+    if user and password:
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        req.add_header("Authorization", f"Basic {token}")
+
+    # 内网直连：绝不能让 http_proxy 把请求劫走
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=TIMEOUT) as resp:
+            raw = resp.read().decode()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode()[:300]
+        try:
+            detail = json.loads(detail).get("error", detail)
+        except Exception:
+            pass
+        if e.code == 401:
+            raise PsError(
+                f"认证失败（{url}）。检查 PS_AUTH_USER / PS_AUTH_PASS 是否已设置。"
+            ) from e
+        raise PsError(f"HTTP {e.code}（{url}）：{detail}") from e
+    except urllib.error.URLError as e:
+        raise PsError(
+            f"连不上 {url}：{e.reason}。\n"
+            f"先确认：① 内网/VPN 通不通 ② PS 服务是否在跑 ③ PS_BASE_URL 是否正确。\n"
+            f"不要凭记忆回答任务状态——连不上就如实说连不上。"
+        ) from e
+
+    if not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+# ---------- 展示 ----------
+
+
+def mark(t: dict) -> str:
+    if t.get("awaiting"):
+        return "⏸"
+    return {"doing": "▶", "done": "✓", "canceled": "✗"}.get(t.get("status", ""), "○")
+
+
+def line(t: dict) -> str:
+    bits = []
+    if t.get("project"):
+        bits.append(f"#{t['project']}")
+    if t.get("reason"):
+        bits.append(t["reason"])
+    elif t.get("days"):
+        bits.append(f"{t['days']} 天")
+    if t.get("dueDate"):
+        bits.append(f"截止 {t['dueDate']}")
+    tail = "  ·  " + " · ".join(bits) if bits else ""
+    return f"  [{t['ref']}] {mark(t)} {t['title']}{tail}"
+
+
+def show_list(title: str, items: list) -> None:
+    if not items:
+        return
+    print(f"─ {title}（{len(items)}）─")
+    for t in items:
+        print(line(t))
+
+
+def cmd_view(args) -> None:
+    data = request("GET", "/api/agent/view")
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    cap = data["capacity"]
+    print(
+        f"{data['date']}　今天 {cap['today']['used']}/{cap['today']['max']}"
+        f"　在制 {cap['doing']['used']}/{cap['doing']['max']}"
+    )
+    print()
+    show_list("逾期", data["overdue"])
+    show_list("今天", data["today"])
+    show_list("进行中", data["doing"])
+    show_list("待结算", data["settlement"])
+    show_list("等待", data["waiting"])
+    show_list("收件箱", data["inbox"])
+    nxt = data["next"]
+    if nxt:
+        print(f"─ 下一步库存（{len(nxt)}）─")
+        for t in nxt[:10]:
+            print(line(t))
+        if len(nxt) > 10:
+            print(f"  …… 还有 {len(nxt) - 10} 条（pstation next 看全部）")
+
+
+def cmd_scope(args) -> None:
+    data = request("GET", f"/api/agent/view?scope={args.scope}")
+    items = data[args.scope]
+    if args.json:
+        print(json.dumps(items, ensure_ascii=False, indent=2))
+        return
+    if not items:
+        print(f"（{args.scope} 是空的）")
+        return
+    for t in items:
+        print(line(t))
+
+
+def resolve(ref: str) -> dict:
+    """短 ref → 完整任务。前缀唯一才通过——宁可报错也不猜。"""
+    tasks = request("GET", "/api/tasks")
+    hits = [t for t in tasks if t["id"] == ref or t["id"].startswith(ref)]
+    if not hits:
+        hits = [t for t in tasks if ref in t["title"]]
+    if not hits:
+        raise PsError(f"没有匹配「{ref}」的任务。用 pstation view 看当前的 ref。")
+    if len(hits) > 1:
+        names = "\n".join(f"  [{t['id'][:8]}] {t['title']}" for t in hits[:8])
+        raise PsError(f"「{ref}」匹配到 {len(hits)} 条，说清楚是哪条：\n{names}")
+    return hits[0]
+
+
+def cmd_show(args) -> None:
+    task = resolve(args.ref)
+    if args.json:
+        print(json.dumps(task, ensure_ascii=False, indent=2))
+        return
+    print(f"[{task['id'][:8]}] {task['title']}")
+    print(f"  阶段 {task['phase']} · 状态 {task['status']}"
+          + ("（等结果，不占在制名额）" if task.get("awaitingResult") else ""))
+    for label, key in (("承诺日", "plannedFor"), ("截止日", "dueDate"), ("等待", "waitingFor")):
+        if task.get(key):
+            print(f"  {label} {task[key]}")
+    if task.get("notes"):
+        print(f"  备注 {task['notes'][:400]}")
+    history = task.get("history") or []
+    if history:
+        print("  活动记录（近 8 条）")
+        for h in history[-8:]:
+            print(f"    {h['at'][:16].replace('T', ' ')}  {h['label']}")
+
+
+def cmd_add(args) -> None:
+    body = {"title": args.title, "phase": "action" if args.action else "inbox"}
+    if args.plan:
+        body["plannedFor"] = today_iso() if args.plan == "today" else args.plan
+        body["phase"] = "action"  # 承诺了就必须是可行动的
+    if args.due:
+        body["dueDate"] = args.due
+    if args.notes:
+        body["notes"] = args.notes
+    task = request("POST", "/api/tasks", body)
+    where = "下一步" if body["phase"] == "action" else "收件箱"
+    print(f"已建到{where}：[{task['id'][:8]}] {task['title']}")
+
+
+def today_iso() -> str:
+    import datetime
+
+    return datetime.date.today().isoformat()
+
+
+def cmd_plan(args) -> None:
+    task = resolve(args.ref)
+    day = None if args.day in ("none", "clear") else (today_iso() if args.day == "today" else args.day)
+    updated = request("PATCH", f"/api/tasks/{task['id']}", {"plannedFor": day})
+    print(f"[{updated['id'][:8]}] {updated['title']} → "
+          + (f"承诺 {day} 做" if day else "移出今天"))
+
+
+def cmd_do(args) -> None:
+    if args.event not in EVENTS:
+        raise PsError(f"未知动作「{args.event}」。可用：{' / '.join(sorted(EVENTS))}")
+    task = resolve(args.ref)
+    body = {"type": EVENTS[args.event]}
+    if args.event == "cancel" and args.reason:
+        body["reason"] = args.reason
+    result = request("POST", f"/api/tasks/{task['id']}/transition", body)
+    t = result["task"]
+    print(f"[{t['id'][:8]}] {t['title']} → {args.event}（状态 {t['status']}"
+          + ("，等结果" if t.get("awaitingResult") else "") + "）")
+    if result.get("spawned"):
+        print(f"  重复任务已生成下一次：{result['spawned']['title']}")
+
+
+def cmd_note(args) -> None:
+    task = resolve(args.ref)
+    merged = f"{task['notes']}\n{args.text}" if task.get("notes") else args.text
+    request("PATCH", f"/api/tasks/{task['id']}", {"notes": merged})
+    print(f"[{task['id'][:8]}] 备注已追加")
+
+
+def cmd_observe(args) -> None:
+    data = request("GET", "/api/agent/observe?format=json")
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    if not data.get("coachEnabled"):
+        print("教练模式已关（用户在设置里关掉了）。闭嘴。")
+        return
+    top = data.get("observation")
+    if not top:
+        print("没有模式成立。今天没什么好说的——这才是常态。")
+        return
+    print(f"最该说的：[{top['kind']}] {top['evidence']}")
+    if top.get("taskTitle"):
+        print(f"  指向任务：[{top['taskRef']}] {top['taskTitle']}")
+    rest = [o for o in data.get("all", []) if o["kind"] != top["kind"]]
+    if rest:
+        print("其余成立的模式（仅供判断整体状况，别一次全说）：")
+        for o in rest:
+            print(f"  - {o['evidence']}")
+
+
+def cmd_review(args) -> None:
+    data = request("POST", "/api/agent/review-draft")
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    print(data["draft"])
+    if not data.get("byAi"):
+        print("\n（这份是 PS 本地按真实数据拼的兜底初稿，不是 LLM 写的）")
+
+
+def cmd_raw(args) -> None:
+    body = json.loads(args.body) if args.body else None
+    print(json.dumps(request(args.method.upper(), args.path, body), ensure_ascii=False, indent=2))
+
+
+def cmd_doctor(args) -> None:
+    print(f"PS_BASE_URL  {base_url()}")
+    user = os.environ.get("PS_AUTH_USER")
+    print(f"PS_AUTH_USER {user or '（未设置）'}")
+    print(f"PS_AUTH_PASS {'已设置' if os.environ.get('PS_AUTH_PASS') else '（未设置）'}")
+    data = request("GET", "/api/agent/view?scope=today")
+    print(f"连通 ✓　今天 {len(data['today'])} 条")
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="pstation", description="ProfessionalStation 任务系统 CLI")
+    p.add_argument("--json", action="store_true", help="输出原始 JSON")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("view", help="全局快照：容量 + 各范围清单").set_defaults(func=cmd_view)
+    for s in SCOPES:
+        sp = sub.add_parser(s, help=f"只看{s}")
+        sp.set_defaults(func=cmd_scope, scope=s)
+
+    sp = sub.add_parser("show", help="一条任务的详情与活动记录")
+    sp.add_argument("ref")
+    sp.set_defaults(func=cmd_show)
+
+    sp = sub.add_parser("add", help="新建任务（默认进收件箱，等用户澄清）")
+    sp.add_argument("title")
+    sp.add_argument("--plan", help="承诺哪天做：today 或 YYYY-MM-DD")
+    sp.add_argument("--due", help="截止日 YYYY-MM-DD")
+    sp.add_argument("--notes", help="备注")
+    sp.add_argument("--action", action="store_true", help="直接进「下一步」，跳过收件箱")
+    sp.set_defaults(func=cmd_add)
+
+    sp = sub.add_parser("plan", help="改承诺日（today / YYYY-MM-DD / none）")
+    sp.add_argument("ref")
+    sp.add_argument("day")
+    sp.set_defaults(func=cmd_plan)
+
+    sp = sub.add_parser("do", help=f"走状态机：{' / '.join(sorted(EVENTS))}")
+    sp.add_argument("ref")
+    sp.add_argument("event")
+    sp.add_argument("--reason", help="取消原因")
+    sp.set_defaults(func=cmd_do)
+
+    sp = sub.add_parser("note", help="给任务追加备注")
+    sp.add_argument("ref")
+    sp.add_argument("text")
+    sp.set_defaults(func=cmd_note)
+
+    sub.add_parser("observe", help="观察器结论：现在最该说的那一条").set_defaults(func=cmd_observe)
+    sub.add_parser("review", help="本周复盘初稿（PS 侧生成）").set_defaults(func=cmd_review)
+    sub.add_parser("doctor", help="检查连通性与凭据").set_defaults(func=cmd_doctor)
+
+    sp = sub.add_parser("raw", help="直接打 PS 的 API（逃生口）")
+    sp.add_argument("method")
+    sp.add_argument("path")
+    sp.add_argument("body", nargs="?")
+    sp.set_defaults(func=cmd_raw)
+
+    args = p.parse_args()
+    try:
+        args.func(args)
+    except PsError as e:
+        print(f"✘ {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
